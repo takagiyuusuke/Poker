@@ -56,6 +56,7 @@ class GameState(BaseModel):
     recommended_action: Optional[str] = None
     game_over: bool = False
     winner: Optional[int] = None
+    hand_over: bool = False
 
 def load_dqn_agents(checkpoint_path: str) -> List[DQNAgent]:
     """Load two DQN agents from the checkpoint file."""
@@ -105,6 +106,21 @@ def get_q_values_and_recommendation(agent: DQNAgent, obs: dict) -> tuple:
         print(f"Error getting Q-values: {e}")
         return None, None
 
+def detect_winner(env) -> Optional[int]:
+    """Detect the winner of the current hand or game."""
+    try:
+        if env.is_over():
+            payoffs = env.get_payoffs()
+            if payoffs:
+                return int(np.argmax(payoffs))
+    except:
+        pass
+    return None
+
+def is_hand_over(env) -> bool:
+    """Check if the current hand is over."""
+    return env.is_over()
+
 def convert_game_state(env, obs: dict, current_player_id: int) -> GameState:
     """Convert RLCard game state to our API format."""
     try:
@@ -117,29 +133,42 @@ def convert_game_state(env, obs: dict, current_player_id: int) -> GameState:
         if hasattr(env.game, 'public_cards'):
             community_cards = [format_card(card) for card in env.game.public_cards]
         
-        # Get player info
+        # Get player info - ensure all 3 players are included
         players = []
-        for i, player in enumerate(env.game.players):
-            is_human = (i == 0)  # Player 0 is human
-            player_name = "あなた" if is_human else f"AI Agent {i}"
-            
-            # Get player's hand (only show human player's cards)
-            hand = []
-            if is_human and hasattr(player, 'hand'):
-                hand = [format_card(card) for card in player.hand]
-            elif not is_human:
-                # For AI players, we'll show placeholder cards
-                hand = ["??", "??"] if hasattr(player, 'hand') and len(player.hand) > 0 else []
-            
-            players.append({
-                "id": i,
-                "name": player_name,
-                "stack": getattr(player, 'stack', START_BANKROLL),
-                "hand": hand,
-                "in_chips": getattr(player, 'in_chips', 0),
-                "folded": getattr(player, 'folded', False),
-                "is_human": is_human
-            })
+        for i in range(3):  # Explicitly handle 3 players
+            if i < len(env.game.players):
+                player = env.game.players[i]
+                is_human = (i == 0)  # Player 0 is human
+                player_name = "You" if is_human else f"AI Agent {i}"
+                
+                # Get player's hand (only show human player's cards)
+                hand = []
+                if is_human and hasattr(player, 'hand'):
+                    hand = [format_card(card) for card in player.hand]
+                elif not is_human:
+                    # For AI players, show placeholder cards if they have cards
+                    hand = ["??", "??"] if hasattr(player, 'hand') and len(player.hand) > 0 else []
+                
+                players.append({
+                    "id": i,
+                    "name": player_name,
+                    "stack": getattr(player, 'stack', START_BANKROLL),
+                    "hand": hand,
+                    "in_chips": getattr(player, 'in_chips', 0),
+                    "folded": getattr(player, 'folded', False),
+                    "is_human": is_human
+                })
+            else:
+                # Fallback for missing players
+                players.append({
+                    "id": i,
+                    "name": f"AI Agent {i}",
+                    "stack": START_BANKROLL,
+                    "hand": [],
+                    "in_chips": 0,
+                    "folded": False,
+                    "is_human": False
+                })
         
         # Get legal actions
         legal_actions = {}
@@ -148,12 +177,18 @@ def convert_game_state(env, obs: dict, current_player_id: int) -> GameState:
                 action_name = map_id_to_name(obs, action_id)
                 legal_actions[action_id] = action_name
         
-        # Get Q-values if it's an AI player's turn
+        # Get Q-values if it's the human player's turn (not just AI)
         q_values = None
         recommended_action = None
-        if current_player_id > 0 and current_player_id <= len(dqn_agents):
-            agent = dqn_agents[current_player_id - 1]
+        if current_player_id == 0 and len(dqn_agents) > 0:  # Human player's turn
+            # Use first AI agent to provide recommendations
+            agent = dqn_agents[0]
             q_values, recommended_action = get_q_values_and_recommendation(agent, obs)
+        
+        # Detect winner and game state
+        winner = detect_winner(env)
+        hand_over = is_hand_over(env)
+        game_over = hand_over and any(p["stack"] <= 0 for p in players)
         
         return GameState(
             current_player=current_player_id,
@@ -164,8 +199,9 @@ def convert_game_state(env, obs: dict, current_player_id: int) -> GameState:
             legal_actions=legal_actions,
             q_values=q_values,
             recommended_action=recommended_action,
-            game_over=env.is_over(),
-            winner=None  # You can implement winner detection logic here
+            game_over=game_over,
+            winner=winner,
+            hand_over=hand_over
         )
     except Exception as e:
         print(f"Error converting game state: {e}")
@@ -250,6 +286,25 @@ async def make_action(request: ActionRequest):
                     ai_action = legal_actions[0] if legal_actions else 0
             
             obs, current_player_id = env.step(ai_action)
+        
+        # Check if hand is over
+        if env.is_over():
+            # Get payoffs and update stacks
+            payoffs = env.get_payoffs()
+            for i, player in enumerate(env.game.players):
+                # Update stack based on payoff (assuming payoffs are in big blinds)
+                player.stack += payoffs[i] * 2  # Convert to chips (assuming 2 chip big blind)
+            
+            # Check if anyone is bankrupt
+            bankrupt_players = [i for i, p in enumerate(env.game.players) if p.stack <= 0]
+            
+            if not bankrupt_players:
+                # Start new hand if no one is bankrupt
+                obs, current_player_id = env.reset()
+                # Restore stacks
+                for i, player in enumerate(env.game.players):
+                    # Stack should already be updated from payoffs
+                    pass
         
         # Update game state
         current_game['obs'] = obs
