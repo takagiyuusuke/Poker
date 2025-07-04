@@ -4,7 +4,7 @@ import { useState, useEffect } from "react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
-import { Loader2, Coins, TrendingUp, Clock } from "lucide-react"
+import { Loader2, Coins, TrendingUp, Clock, X } from "lucide-react"
 
 interface GameState {
   current_player: number
@@ -27,6 +27,18 @@ interface GameState {
   game_over: boolean
   winner?: number
   hand_over?: boolean
+  hand_results?: {
+    winner: number
+    payoffs: number[]
+    final_stacks: number[]
+  }
+}
+
+interface HandResult {
+  winner: number
+  payoffs: number[]
+  final_stacks: number[]
+  player_names: string[]
 }
 
 const SUIT_SYMBOLS = { C: "♣", D: "♦", H: "♥", S: "♠" }
@@ -182,11 +194,62 @@ function PlayerActionIndicator({
   )
 }
 
+function HandResultModal({
+  handResult,
+  onClose,
+}: {
+  handResult: HandResult | null
+  onClose: () => void
+}) {
+  if (!handResult) return null
+
+  return (
+    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+      <Card className="w-96 bg-gradient-to-br from-yellow-50 to-orange-50 border-yellow-200 shadow-2xl">
+        <CardHeader className="flex flex-row items-center justify-between">
+          <CardTitle className="text-xl font-bold text-gray-800">Hand Complete!</CardTitle>
+          <Button variant="ghost" size="sm" onClick={onClose}>
+            <X className="w-4 h-4" />
+          </Button>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="text-center">
+            <h3 className="text-lg font-semibold text-green-700 mb-2">
+              Winner: {handResult.player_names[handResult.winner]}
+            </h3>
+          </div>
+
+          <div className="space-y-2">
+            <h4 className="font-semibold text-gray-700">Results:</h4>
+            {handResult.payoffs.map((payoff, index) => (
+              <div key={index} className="flex justify-between items-center p-2 bg-white rounded">
+                <span className="font-medium">{handResult.player_names[index]}</span>
+                <div className="flex items-center gap-2">
+                  <span className={`font-bold ${payoff >= 0 ? "text-green-600" : "text-red-600"}`}>
+                    {payoff >= 0 ? "+" : ""}${payoff}
+                  </span>
+                  <span className="text-sm text-gray-500">(Stack: ${handResult.final_stacks[index]})</span>
+                </div>
+              </div>
+            ))}
+          </div>
+
+          <Button onClick={onClose} className="w-full bg-blue-600 hover:bg-blue-700">
+            Continue
+          </Button>
+        </CardContent>
+      </Card>
+    </div>
+  )
+}
+
 export default function PokerGame() {
   const [gameState, setGameState] = useState<GameState | null>(null)
   const [loading, setLoading] = useState(false)
   const [gameStarted, setGameStarted] = useState(false)
   const [lastAction, setLastAction] = useState<{ playerId: number; action: string } | null>(null)
+  const [handResult, setHandResult] = useState<HandResult | null>(null)
+  const [previousGameState, setPreviousGameState] = useState<GameState | null>(null)
 
   const startNewGame = async () => {
     setLoading(true)
@@ -196,6 +259,8 @@ export default function PokerGame() {
       setGameState(data)
       setGameStarted(true)
       setLastAction(null)
+      setHandResult(null)
+      setPreviousGameState(null)
     } catch (error) {
       console.error("Failed to start game:", error)
     } finally {
@@ -217,6 +282,17 @@ export default function PokerGame() {
         body: JSON.stringify({ action_id: actionId }),
       })
       const data = await response.json()
+
+      // Check if hand just completed
+      if (data.hand_results && gameState.players) {
+        setHandResult({
+          winner: data.hand_results.winner,
+          payoffs: data.hand_results.payoffs,
+          final_stacks: data.hand_results.final_stacks,
+          player_names: gameState.players.map((p) => p.name),
+        })
+      }
+
       setGameState(data)
     } catch (error) {
       console.error("Failed to make action:", error)
@@ -242,6 +318,17 @@ export default function PokerGame() {
         }
       }
 
+      // Check if hand just completed
+      if (data.hand_results && !handResult) {
+        setHandResult({
+          winner: data.hand_results.winner,
+          payoffs: data.hand_results.payoffs,
+          final_stacks: data.hand_results.final_stacks,
+          player_names: gameState.players?.map((p) => p.name) || [],
+        })
+      }
+
+      setPreviousGameState(gameState)
       setGameState(data)
     } catch (error) {
       console.error("Failed to poll game state:", error)
@@ -268,7 +355,7 @@ export default function PokerGame() {
   useEffect(() => {
     if (!gameStarted) return
 
-    const interval = setInterval(pollGameState, 1000)
+    const interval = setInterval(pollGameState, 1500) // Slightly slower polling
     return () => clearInterval(interval)
   }, [gameStarted, gameState])
 
@@ -493,32 +580,29 @@ export default function PokerGame() {
             </div>
           )}
 
-          {/* Hand Over / Game Over */}
-          {(gameState.hand_over || gameState.game_over) && (
+          {/* Game Over */}
+          {gameState.game_over && (
             <div className="mt-6 text-center">
               <Card className="w-96 mx-auto bg-gradient-to-br from-yellow-50 to-orange-50 border-yellow-200 shadow-xl">
                 <CardContent className="p-6">
-                  <h3 className="text-xl font-bold mb-4 text-gray-800">
-                    {gameState.game_over ? "Game Over!" : "Hand Complete!"}
-                  </h3>
+                  <h3 className="text-xl font-bold mb-4 text-gray-800">Game Over!</h3>
                   {gameState.winner !== undefined && gameState.players && (
                     <p className="mb-4 text-lg font-semibold text-green-700">
                       Winner: {gameState.players[gameState.winner]?.name}
                     </p>
                   )}
-                  {gameState.game_over ? (
-                    <Button onClick={startNewGame} className="w-full bg-blue-600 hover:bg-blue-700">
-                      Start New Game
-                    </Button>
-                  ) : (
-                    <div className="text-gray-600">Next hand starting soon...</div>
-                  )}
+                  <Button onClick={startNewGame} className="w-full bg-blue-600 hover:bg-blue-700">
+                    Start New Game
+                  </Button>
                 </CardContent>
               </Card>
             </div>
           )}
         </div>
       </div>
+
+      {/* Hand Result Modal */}
+      <HandResultModal handResult={handResult} onClose={() => setHandResult(null)} />
 
       <style jsx>{`
         @keyframes fadeInOut {

@@ -15,6 +15,7 @@ from pathlib import Path
 import rlcard
 from typing import Dict, List, Any, Optional
 import copy
+import time
 
 # Import your DQN classes (assuming they're in the same directory or properly installed)
 # You'll need to adjust these imports based on your actual file structure
@@ -57,6 +58,7 @@ class GameState(BaseModel):
     game_over: bool = False
     winner: Optional[int] = None
     hand_over: bool = False
+    hand_results: Optional[Dict[str, Any]] = None
 
 def load_dqn_agents(checkpoint_path: str) -> List[DQNAgent]:
     """Load two DQN agents from the checkpoint file."""
@@ -192,6 +194,15 @@ def convert_game_state(env, obs: dict, current_player_id: int) -> GameState:
         hand_over = is_hand_over(env)
         game_over = hand_over and any(p["stack"] <= 0 for p in players)
         
+        # Check for hand results
+        hand_results = None
+        if hand_over and hasattr(env, '_last_payoffs'):
+            hand_results = {
+                "winner": winner if winner is not None else 0,
+                "payoffs": env._last_payoffs,
+                "final_stacks": [p["stack"] for p in players]
+            }
+        
         return GameState(
             current_player=current_player_id,
             stage=stage,
@@ -203,7 +214,8 @@ def convert_game_state(env, obs: dict, current_player_id: int) -> GameState:
             recommended_action=recommended_action,
             game_over=game_over,
             winner=winner,
-            hand_over=hand_over
+            hand_over=hand_over,
+            hand_results=hand_results
         )
     except Exception as e:
         print(f"Error converting game state: {e}")
@@ -224,7 +236,7 @@ async def start_game():
     
     try:
         # Create new RLCard environment
-        env = rlcard.make('limit-holdem', config={'seed': 42, 'num_players': 3})
+        env = rlcard.make('limit-holdem', config={'seed': None, 'num_players': 3})
         
         # Create agents: Human (index 0), AI Agent 1 (index 1), AI Agent 2 (index 2)
         human_agent = None  # Human player doesn't need an agent object
@@ -245,7 +257,8 @@ async def start_game():
         current_game = {
             'env': env,
             'obs': obs,
-            'current_player_id': current_player_id
+            'current_player_id': current_player_id,
+            'initial_stacks': [START_BANKROLL] * 3
         }
         
         # Convert and return game state
@@ -268,11 +281,17 @@ async def make_action(request: ActionRequest):
         env = current_game['env']
         action_id = request.action_id
         
+        # Store previous stacks for payoff calculation
+        prev_stacks = [p.stack for p in env.game.players]
+        
         # Make the action
         obs, current_player_id = env.step(action_id)
         
-        # Process AI turns automatically
+        # Process AI turns automatically with small delays
         while not env.is_over() and current_player_id != 0:
+            # Add small delay to make AI actions visible
+            time.sleep(0.5)
+            
             # AI player's turn
             if current_player_id <= len(dqn_agents):
                 agent = dqn_agents[current_player_id - 1]
@@ -293,9 +312,17 @@ async def make_action(request: ActionRequest):
         if env.is_over():
             # Get payoffs and update stacks
             payoffs = env.get_payoffs()
+            
+            # Store payoffs for hand results
+            env._last_payoffs = payoffs
+            
+            # Update stacks based on payoffs
             for i, player in enumerate(env.game.players):
-                # Update stack based on payoff (assuming payoffs are in big blinds)
-                player.stack += payoffs[i] * 2  # Convert to chips (assuming 2 chip big blind)
+                # Payoffs are already in chips, add to stack
+                player.stack += payoffs[i]
+                # Ensure stack doesn't go below 0
+                if player.stack < 0:
+                    player.stack = 0
             
             # Check if anyone is bankrupt
             bankrupt_players = [i for i, p in enumerate(env.game.players) if p.stack <= 0]
@@ -303,10 +330,6 @@ async def make_action(request: ActionRequest):
             if not bankrupt_players:
                 # Start new hand if no one is bankrupt
                 obs, current_player_id = env.reset()
-                # Restore stacks
-                for i, player in enumerate(env.game.players):
-                    # Stack should already be updated from payoffs
-                    pass
         
         # Update game state
         current_game['obs'] = obs

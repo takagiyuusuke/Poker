@@ -1,20 +1,23 @@
-import { NextResponse } from "next/server"
+import { type NextRequest, NextResponse } from "next/server"
 
-export async function GET() {
+export async function GET(request: NextRequest) {
   try {
-    // Get current game state from Python backend
     const response = await fetch("http://localhost:8000/get_state", {
       method: "GET",
+      headers: {
+        "Content-Type": "application/json",
+      },
     })
 
     if (!response.ok) {
-      throw new Error("Failed to get game state")
+      throw new Error(`Backend error: ${response.status}`)
     }
 
-    const gameState = await response.json()
-    return NextResponse.json(gameState)
+    const data = await response.json()
+
+    return NextResponse.json(data)
   } catch (error) {
-    console.error("Error getting game state:", error)
-    return NextResponse.json({ error: "Failed to get game state" }, { status: 500 })
+    console.error("Get state API error:", error)
+    return NextResponse.json({ error: "Failed to get state" }, { status: 500 })
   }
 }

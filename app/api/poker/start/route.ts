@@ -1,12 +1,9 @@
-import { NextResponse } from "next/server"
+import { type NextRequest, NextResponse } from "next/server"
 
-// Game state will be stored in memory for this demo
-// In production, you'd want to use a database or session storage
 let gameState: any = null
 
-export async function POST() {
+export async function POST(request: NextRequest) {
   try {
-    // Initialize a new game by calling the Python backend
     const response = await fetch("http://localhost:8000/start_game", {
       method: "POST",
       headers: {
@@ -15,13 +12,15 @@ export async function POST() {
     })
 
     if (!response.ok) {
-      throw new Error("Failed to start game")
+      throw new Error(`Backend error: ${response.status}`)
     }
 
-    gameState = await response.json()
-    return NextResponse.json(gameState)
+    const data = await response.json()
+    gameState = data
+
+    return NextResponse.json(data)
   } catch (error) {
-    console.error("Error starting game:", error)
+    console.error("Start game API error:", error)
     return NextResponse.json({ error: "Failed to start game" }, { status: 500 })
   }
 }

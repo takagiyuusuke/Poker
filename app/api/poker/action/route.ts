@@ -1,10 +1,11 @@
-import { NextResponse } from "next/server"
+import { type NextRequest, NextResponse } from "next/server"
 
-export async function POST(request: Request) {
+let gameState: any = null
+
+export async function POST(request: NextRequest) {
   try {
     const { action_id } = await request.json()
 
-    // Send action to Python backend
     const response = await fetch("http://localhost:8000/make_action", {
       method: "POST",
       headers: {
@@ -14,13 +15,15 @@ export async function POST(request: Request) {
     })
 
     if (!response.ok) {
-      throw new Error("Failed to make action")
+      throw new Error(`Backend error: ${response.status}`)
     }
 
-    const gameState = await response.json()
-    return NextResponse.json(gameState)
+    const data = await response.json()
+    gameState = data
+
+    return NextResponse.json(data)
   } catch (error) {
-    console.error("Error making action:", error)
+    console.error("Action API error:", error)
     return NextResponse.json({ error: "Failed to make action" }, { status: 500 })
   }
 }
