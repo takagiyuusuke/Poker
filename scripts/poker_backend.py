@@ -135,19 +135,21 @@ def convert_game_state(env, obs: dict, current_player_id: int) -> GameState:
         
         # Get player info - ensure all 3 players are included
         players = []
+        game_players = env.game.players if hasattr(env.game, 'players') else []
+        
         for i in range(3):  # Explicitly handle 3 players
-            if i < len(env.game.players):
-                player = env.game.players[i]
+            if i < len(game_players):
+                player = game_players[i]
                 is_human = (i == 0)  # Player 0 is human
                 player_name = "You" if is_human else f"AI Agent {i}"
                 
                 # Get player's hand (only show human player's cards)
                 hand = []
-                if is_human and hasattr(player, 'hand'):
+                if is_human and hasattr(player, 'hand') and player.hand:
                     hand = [format_card(card) for card in player.hand]
                 elif not is_human:
                     # For AI players, show placeholder cards if they have cards
-                    hand = ["??", "??"] if hasattr(player, 'hand') and len(player.hand) > 0 else []
+                    hand = ["??", "??"] if hasattr(player, 'hand') and player.hand and len(player.hand) > 0 else []
                 
                 players.append({
                     "id": i,
@@ -164,7 +166,7 @@ def convert_game_state(env, obs: dict, current_player_id: int) -> GameState:
                     "id": i,
                     "name": f"AI Agent {i}",
                     "stack": START_BANKROLL,
-                    "hand": [],
+                    "hand": ["??", "??"],
                     "in_chips": 0,
                     "folded": False,
                     "is_human": False
