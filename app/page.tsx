@@ -39,6 +39,7 @@ interface HandResult {
   payoffs: number[]
   final_stacks: number[]
   player_names: string[]
+  hand_ranks?: string[]
 }
 
 const SUIT_SYMBOLS = { C: "♣", D: "♦", H: "♥", S: "♠" }
@@ -175,17 +176,24 @@ function PlayerActionIndicator({
   action,
   isVisible,
   isAI = false,
-}: { action?: string; isVisible: boolean; isAI?: boolean }) {
+}: {
+  action?: string
+  isVisible: boolean
+  isAI?: boolean
+}) {
   if (!isVisible || !action) return null
 
   return (
     <div className="absolute -top-10 left-1/2 transform -translate-x-1/2 z-20">
       <div
         className={`px-4 py-2 rounded-full text-sm font-medium shadow-lg transition-all duration-500 ${
-          isAI ? "bg-blue-600 text-white animate-pulse" : "bg-green-600 text-white"
+          isAI
+            ? "bg-gradient-to-r from-blue-600 to-blue-700 text-white"
+            : "bg-gradient-to-r from-green-600 to-green-700 text-white"
         }`}
         style={{
-          animation: isVisible ? "fadeInOut 10s ease-in-out" : "none",
+          animation: "fadeInOut 3s ease-in-out",
+          opacity: isVisible ? 1 : 0,
         }}
       >
         {action}
@@ -197,9 +205,11 @@ function PlayerActionIndicator({
 function HandResultModal({
   handResult,
   onClose,
+  playerNames,
 }: {
   handResult: HandResult | null
   onClose: () => void
+  playerNames: string[]
 }) {
   if (!handResult) return null
 
@@ -215,25 +225,29 @@ function HandResultModal({
         <CardContent className="space-y-4">
           <div className="text-center">
             <h3 className="text-lg font-semibold text-green-700 mb-2">
-              Winner: {handResult.player_names[handResult.winner]}
+              Winner: {playerNames[handResult.winner]}
             </h3>
           </div>
-
           <div className="space-y-2">
             <h4 className="font-semibold text-gray-700">Results:</h4>
             {handResult.payoffs.map((payoff, index) => (
-              <div key={index} className="flex justify-between items-center p-2 bg-white rounded">
-                <span className="font-medium">{handResult.player_names[index]}</span>
-                <div className="flex items-center gap-2">
-                  <span className={`font-bold ${payoff >= 0 ? "text-green-600" : "text-red-600"}`}>
-                    {payoff >= 0 ? "+" : ""}${payoff}
-                  </span>
-                  <span className="text-sm text-gray-500">(Stack: ${handResult.final_stacks[index]})</span>
+              <div key={index} className="flex flex-col p-2 bg-white rounded mb-2">
+                <div className="flex justify-between items-center">
+                  <span className="font-medium">{playerNames[index]}</span>
+                  <div className="flex items-center gap-2">
+                    <span className={`font-bold ${payoff >= 0 ? "text-green-600" : "text-red-600"}`}>
+                      {payoff >= 0 ? "+" : ""}${payoff}
+                    </span>
+                    <span className="text-sm text-gray-500">(Stack: ${handResult.final_stacks[index]})</span>
+                  </div>
                 </div>
+                {/* 役情報の表示 */}
+                {handResult.hand_ranks && handResult.hand_ranks[index] && (
+                  <div className="text-xs text-gray-700 mt-1">Hand: {handResult.hand_ranks[index]}</div>
+                )}
               </div>
             ))}
           </div>
-
           <Button onClick={onClose} className="w-full bg-blue-600 hover:bg-blue-700">
             Continue
           </Button>
@@ -247,9 +261,15 @@ export default function PokerGame() {
   const [gameState, setGameState] = useState<GameState | null>(null)
   const [loading, setLoading] = useState(false)
   const [gameStarted, setGameStarted] = useState(false)
-  const [lastAction, setLastAction] = useState<{ playerId: number; action: string } | null>(null)
+  const [playerActions, setPlayerActions] = useState<{ [key: number]: { action: string; timestamp: number } }>({})
   const [handResult, setHandResult] = useState<HandResult | null>(null)
-  const [previousGameState, setPreviousGameState] = useState<GameState | null>(null)
+
+  const updatePlayerAction = (playerId: number, action: string) => {
+    setPlayerActions((prev) => ({
+      ...prev,
+      [playerId]: { action, timestamp: Date.now() },
+    }))
+  }
 
   const startNewGame = async () => {
     setLoading(true)
@@ -258,9 +278,8 @@ export default function PokerGame() {
       const data = await response.json()
       setGameState(data)
       setGameStarted(true)
-      setLastAction(null)
+      setPlayerActions({})
       setHandResult(null)
-      setPreviousGameState(null)
     } catch (error) {
       console.error("Failed to start game:", error)
     } finally {
@@ -270,10 +289,9 @@ export default function PokerGame() {
 
   const makeAction = async (actionId: number) => {
     if (!gameState || gameState.current_player !== 0) return
-
     setLoading(true)
     const actionName = gameState.legal_actions[actionId]
-    setLastAction({ playerId: 0, action: actionName })
+    updatePlayerAction(0, actionName)
 
     try {
       const response = await fetch("/api/poker/action", {
@@ -283,7 +301,15 @@ export default function PokerGame() {
       })
       const data = await response.json()
 
-      // Check if hand just completed
+      // AIのアクションを表示
+      if (data.players) {
+        data.players.forEach((player: any) => {
+          if (!player.is_human && player.last_action) {
+            updatePlayerAction(player.id, player.last_action)
+          }
+        })
+      }
+
       if (data.hand_results && gameState.players) {
         setHandResult({
           winner: data.hand_results.winner,
@@ -308,64 +334,58 @@ export default function PokerGame() {
       const response = await fetch("/api/poker/state")
       const data = await response.json()
 
-      // Show AI action if current player changed
-      if (data.current_player !== gameState.current_player && gameState.players) {
-        const aiPlayer = gameState.players[gameState.current_player]
-        if (aiPlayer && !aiPlayer.is_human) {
-          // Determine the action taken by the AI
-          const actionTaken = determineAIAction(gameState, data)
-          setLastAction({ playerId: gameState.current_player, action: actionTaken })
-        }
+      // AIのアクションを表示
+      if (data.players) {
+        data.players.forEach((player: any) => {
+          if (!player.is_human && player.last_action) {
+            updatePlayerAction(player.id, player.last_action)
+          }
+        })
       }
 
       // Check if hand just completed
-      if (data.hand_results && !handResult) {
+      if (data.hand_results && !handResult && gameState.players) {
         setHandResult({
           winner: data.hand_results.winner,
           payoffs: data.hand_results.payoffs,
           final_stacks: data.hand_results.final_stacks,
-          player_names: gameState.players?.map((p) => p.name) || [],
+          player_names: gameState.players.map((p) => p.name),
         })
       }
 
-      setPreviousGameState(gameState)
       setGameState(data)
     } catch (error) {
       console.error("Failed to poll game state:", error)
     }
   }
 
-  const determineAIAction = (prevState: GameState, newState: GameState): string => {
-    if (!prevState.players || !newState.players) return "Action"
-
-    const prevPlayer = prevState.players[prevState.current_player]
-    const newPlayer = newState.players[prevState.current_player]
-
-    if (!prevPlayer || !newPlayer) return "Action"
-
-    if (newPlayer.folded && !prevPlayer.folded) return "Fold"
-    if (newPlayer.in_chips > prevPlayer.in_chips) {
-      const diff = newPlayer.in_chips - prevPlayer.in_chips
-      return diff > 0 ? `Bet $${diff}` : "Call"
-    }
-    if (newPlayer.in_chips === prevPlayer.in_chips) return "Check"
-    return "Action"
-  }
-
   useEffect(() => {
     if (!gameStarted) return
-
-    const interval = setInterval(pollGameState, 1500) // Slightly slower polling
+    const interval = setInterval(pollGameState, 1500)
     return () => clearInterval(interval)
   }, [gameStarted, gameState])
 
-  // Clear action indicator after 10 seconds with fade out
+  // アクション表示を3秒後に消す
   useEffect(() => {
-    if (lastAction) {
-      const timer = setTimeout(() => setLastAction(null), 10000)
-      return () => clearTimeout(timer)
-    }
-  }, [lastAction])
+    const now = Date.now()
+    const timeouts: NodeJS.Timeout[] = []
+
+    Object.entries(playerActions).forEach(([playerId, { timestamp }]) => {
+      const remainingTime = Math.max(0, 3000 - (now - timestamp))
+      if (remainingTime > 0) {
+        const timeout = setTimeout(() => {
+          setPlayerActions((prev) => {
+            const newActions = { ...prev }
+            delete newActions[parseInt(playerId)]
+            return newActions
+          })
+        }, remainingTime)
+        timeouts.push(timeout)
+      }
+    })
+
+    return () => timeouts.forEach(clearTimeout)
+  }, [playerActions])
 
   if (!gameStarted) {
     return (
@@ -408,7 +428,7 @@ export default function PokerGame() {
           <div className="flex justify-center gap-6 text-white text-sm">
             <div className="flex items-center gap-2">
               <Clock className="w-4 h-4" />
-              <span>Stage: {gameState.stage.charAt(0).toUpperCase() + gameState.stage.slice(1)}</span>
+              <span>Stage: {gameState.stage ? gameState.stage.charAt(0).toUpperCase() + gameState.stage.slice(1) : "Unknown"}</span>
             </div>
             <div className="flex items-center gap-2">
               <Coins className="w-4 h-4" />
@@ -424,7 +444,7 @@ export default function PokerGame() {
           <div className="text-center mb-6">
             <h3 className="text-white mb-3 text-lg font-semibold">Community Cards</h3>
             <div className="flex justify-center gap-2">
-              {gameState.community_cards.length > 0 ? (
+              {Array.isArray(gameState.community_cards) && gameState.community_cards.length > 0 ? (
                 <CardDisplay cards={gameState.community_cards} />
               ) : (
                 <div className="text-white text-sm opacity-75">No community cards yet</div>
@@ -442,8 +462,8 @@ export default function PokerGame() {
             <div className="absolute top-0 left-8">
               <div className="relative">
                 <PlayerActionIndicator
-                  action={lastAction?.playerId === 1 ? lastAction.action : undefined}
-                  isVisible={lastAction?.playerId === 1}
+                  action={playerActions[1]?.action}
+                  isVisible={!!playerActions[1]}
                   isAI={true}
                 />
                 <Card className="w-48 bg-gradient-to-br from-blue-50 to-blue-100 border-blue-200 shadow-xl">
@@ -477,8 +497,8 @@ export default function PokerGame() {
             <div className="absolute top-0 right-8">
               <div className="relative">
                 <PlayerActionIndicator
-                  action={lastAction?.playerId === 2 ? lastAction.action : undefined}
-                  isVisible={lastAction?.playerId === 2}
+                  action={playerActions[2]?.action}
+                  isVisible={!!playerActions[2]}
                   isAI={true}
                 />
                 <Card className="w-48 bg-gradient-to-br from-purple-50 to-purple-100 border-purple-200 shadow-xl">
@@ -514,8 +534,8 @@ export default function PokerGame() {
             <div className="absolute bottom-0 left-1/2 transform -translate-x-1/2">
               <div className="relative">
                 <PlayerActionIndicator
-                  action={lastAction?.playerId === 0 ? lastAction.action : undefined}
-                  isVisible={lastAction?.playerId === 0}
+                  action={playerActions[0]?.action}
+                  isVisible={!!playerActions[0]}
                   isAI={false}
                 />
                 <Card className="w-60 bg-gradient-to-br from-green-50 to-green-100 border-green-200 shadow-xl">
@@ -602,7 +622,7 @@ export default function PokerGame() {
       </div>
 
       {/* Hand Result Modal */}
-      <HandResultModal handResult={handResult} onClose={() => setHandResult(null)} />
+      <HandResultModal handResult={handResult} onClose={() => setHandResult(null)} playerNames={gameState.players?.map((p) => p.name) || []} />
 
       <style jsx>{`
         @keyframes fadeInOut {
