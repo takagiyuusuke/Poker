@@ -206,10 +206,12 @@ function HandResultModal({
   handResult,
   onClose,
   playerNames,
+  startNewGame,
 }: {
   handResult: HandResult | null
   onClose: () => void
   playerNames: string[]
+  startNewGame: () => void
 }) {
   if (!handResult) return null
 
@@ -248,8 +250,14 @@ function HandResultModal({
               </div>
             ))}
           </div>
-          <Button onClick={onClose} className="w-full bg-blue-600 hover:bg-blue-700">
-            Continue
+          <Button
+            onClick={() => {
+              onClose();
+              startNewGame();
+            }}
+            className="w-full bg-blue-600 hover:bg-blue-700"
+          >
+            Next Hand
           </Button>
         </CardContent>
       </Card>
@@ -458,113 +466,88 @@ export default function PokerGame() {
 
           {/* Players Layout */}
           <div className="relative w-full h-[350px]">
-            {/* AI Player 1 (Top Left) */}
-            <div className="absolute top-0 left-8">
-              <div className="relative">
-                <PlayerActionIndicator
-                  action={playerActions[1]?.action}
-                  isVisible={!!playerActions[1]}
-                  isAI={true}
-                />
-                <Card className="w-48 bg-gradient-to-br from-blue-50 to-blue-100 border-blue-200 shadow-xl">
-                  <CardContent className="p-3">
-                    <div className="text-center space-y-2">
-                      <h4 className="font-bold text-blue-800 text-sm">{aiPlayers[0]?.name}</h4>
-                      <CardDisplay cards={aiPlayers[0]?.hand || ["??", "??"]} hidden />
-                      <div className="flex justify-between items-center text-xs">
-                        <div className="text-center">
-                          <div className="text-gray-600 mb-1">Stack</div>
-                          <ChipStack amount={aiPlayers[0]?.stack || 0} size="sm" />
+            {(gameState.players || []).map((player, idx) => {
+              // 固定３人分の配置クラス
+              const positionClasses = [
+                "absolute top-0 left-8",                            // idx=0: AI1
+                "absolute top-0 right-8",                           // idx=1: AI2
+                "absolute bottom-0 left-1/2 transform -translate-x-1/2" // idx=2: You
+              ];
+              const isAI = !player.is_human;
+              // カード隠しやバッジ色なども idx で使い分け
+              return (
+                <div key={player.id} className={positionClasses[idx]}>
+                  <div className="relative">
+                    <PlayerActionIndicator
+                      action={playerActions[player.id]?.action}
+                      isVisible={!!playerActions[player.id]}
+                      isAI={isAI}
+                    />
+                    <Card
+                      className={`${
+                        isAI
+                          ? idx === 0
+                            ? "w-48 bg-gradient-to-br from-blue-50 to-blue-100 border-blue-200"
+                            : "w-48 bg-gradient-to-br from-purple-50 to-purple-100 border-purple-200"
+                          : "w-60 bg-gradient-to-br from-green-50 to-green-100 border-green-200"
+                      } shadow-xl`}
+                    >
+                      <CardContent className="p-3">
+                        <div className="text-center space-y-2">
+                          {/* プレイヤー名 */}
+                          <h4
+                            className={`font-bold text-sm ${
+                              isAI
+                                ? idx === 0
+                                  ? "text-blue-800"
+                                  : "text-purple-800"
+                                : "text-green-800"
+                            }`}
+                          >
+                            {player.name}{!player.is_human && ""}
+                            {player.is_human && " (You)"}
+                          </h4>
+                          {/* 手札 */}
+                          <CardDisplay cards={player.hand} hidden={isAI} />
+                          {/* スタック＆ベット */}
+                          <div className="flex justify-between items-center text-xs">
+                            <div>
+                              <div className="text-gray-600 mb-1">Stack</div>
+                              <ChipStack amount={player.stack} size="sm" />
+                            </div>
+                            <div>
+                              <div className="text-gray-600 mb-1">Bet</div>
+                              <ChipStack amount={player.in_chips} size="sm" />
+                            </div>
+                          </div>
+                          {/* Folded バッジ */}
+                          {player.folded && (
+                            <Badge variant="destructive" className="text-xs">
+                              Folded
+                            </Badge>
+                          )}
+                          {/* Current Player バッジ */}
+                          {gameState.current_player === idx && (
+                            <Badge
+                              className={`text-xs ${
+                                isAI
+                                  ? idx === 0
+                                    ? "bg-blue-600"
+                                    : "bg-purple-600"
+                                  : "bg-green-600"
+                              }`}
+                            >
+                              {player.is_human ? "Your Turn" : "Current"}
+                            </Badge>
+                          )}
                         </div>
-                        <div className="text-center">
-                          <div className="text-gray-600 mb-1">Bet</div>
-                          <ChipStack amount={aiPlayers[0]?.in_chips || 0} size="sm" />
-                        </div>
-                      </div>
-                      {aiPlayers[0]?.folded && (
-                        <Badge variant="destructive" className="text-xs">
-                          Folded
-                        </Badge>
-                      )}
-                      {gameState.current_player === 1 && <Badge className="bg-blue-600 text-xs">Current Player</Badge>}
-                    </div>
-                  </CardContent>
-                </Card>
-              </div>
-            </div>
-
-            {/* AI Player 2 (Top Right) */}
-            <div className="absolute top-0 right-8">
-              <div className="relative">
-                <PlayerActionIndicator
-                  action={playerActions[2]?.action}
-                  isVisible={!!playerActions[2]}
-                  isAI={true}
-                />
-                <Card className="w-48 bg-gradient-to-br from-purple-50 to-purple-100 border-purple-200 shadow-xl">
-                  <CardContent className="p-3">
-                    <div className="text-center space-y-2">
-                      <h4 className="font-bold text-purple-800 text-sm">{aiPlayers[1]?.name}</h4>
-                      <CardDisplay cards={aiPlayers[1]?.hand || ["??", "??"]} hidden />
-                      <div className="flex justify-between items-center text-xs">
-                        <div className="text-center">
-                          <div className="text-gray-600 mb-1">Stack</div>
-                          <ChipStack amount={aiPlayers[1]?.stack || 0} size="sm" />
-                        </div>
-                        <div className="text-center">
-                          <div className="text-gray-600 mb-1">Bet</div>
-                          <ChipStack amount={aiPlayers[1]?.in_chips || 0} size="sm" />
-                        </div>
-                      </div>
-                      {aiPlayers[1]?.folded && (
-                        <Badge variant="destructive" className="text-xs">
-                          Folded
-                        </Badge>
-                      )}
-                      {gameState.current_player === 2 && (
-                        <Badge className="bg-purple-600 text-xs">Current Player</Badge>
-                      )}
-                    </div>
-                  </CardContent>
-                </Card>
-              </div>
-            </div>
-
-            {/* Human Player (Bottom Center) */}
-            <div className="absolute bottom-0 left-1/2 transform -translate-x-1/2">
-              <div className="relative">
-                <PlayerActionIndicator
-                  action={playerActions[0]?.action}
-                  isVisible={!!playerActions[0]}
-                  isAI={false}
-                />
-                <Card className="w-60 bg-gradient-to-br from-green-50 to-green-100 border-green-200 shadow-xl">
-                  <CardContent className="p-3">
-                    <div className="text-center space-y-2">
-                      <h4 className="font-bold text-green-800 text-sm">{humanPlayer?.name} (You)</h4>
-                      <CardDisplay cards={humanPlayer?.hand || []} />
-                      <div className="flex justify-between items-center text-xs">
-                        <div className="text-center">
-                          <div className="text-gray-600 mb-1">Stack</div>
-                          <ChipStack amount={humanPlayer?.stack || 0} size="sm" />
-                        </div>
-                        <div className="text-center">
-                          <div className="text-gray-600 mb-1">Bet</div>
-                          <ChipStack amount={humanPlayer?.in_chips || 0} size="sm" />
-                        </div>
-                      </div>
-                      {humanPlayer?.folded && (
-                        <Badge variant="destructive" className="text-xs">
-                          Folded
-                        </Badge>
-                      )}
-                      {isPlayerTurn && <Badge className="bg-green-600 text-xs">Your Turn</Badge>}
-                    </div>
-                  </CardContent>
-                </Card>
-              </div>
-            </div>
-          </div>
+                      </CardContent>
+                    </Card>
+                  </div>
+                </div>
+              );
+            })}
+          </div>  
 
           {/* Action Buttons and Q-Values */}
           {isPlayerTurn && !gameState.game_over && (
@@ -622,7 +605,7 @@ export default function PokerGame() {
       </div>
 
       {/* Hand Result Modal */}
-      <HandResultModal handResult={handResult} onClose={() => setHandResult(null)} playerNames={gameState.players?.map((p) => p.name) || []} />
+      <HandResultModal handResult={handResult} onClose={() => setHandResult(null)} playerNames={gameState.players?.map((p) => p.name) || []} startNewGame={startNewGame} />
 
       <style jsx>{`
         @keyframes fadeInOut {
