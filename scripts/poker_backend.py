@@ -62,14 +62,6 @@ class GameState(BaseModel):
     hand_results: Optional[Dict[str, Any]] = None
     last_action: Optional[Dict[str, str]] = None  # プレイヤーごとの最後のアクション
 
-# 役判定用ライブラリ
-try:
-    from treys import Card as TreysCard, Evaluator
-    evaluator = Evaluator()
-except ImportError:
-    TreysCard = None
-    evaluator = None
-
 def load_dqn_agents(checkpoint_path: str) -> List[DQNAgent]:
     """Load two DQN agents from the checkpoint file."""
     agents = []
@@ -243,36 +235,75 @@ async def start_game():
     global current_game
     try:
         env = rlcard.make(
-            'limit-holdem',
-            config={
-                'seed': int(time.time()),
-                'game_num_players': 3,
-                'allow_step_back': False,
-                'allow_raw_data': True,
-            }
-        )
+        'limit-holdem',
+        config={
+            'seed': int(time.time()),          # 任意の乱数シード
+            'game_num_players': 3,             # ← ここが最重要!!
+            'allow_step_back': False,
+        }
+    )
+        # 3人分のエージェントを必ずセット
+        # フロントから行動が届くまで呼ばれないダミー
         class HumanProxyAgent:
             use_raw = True
-            def step(self, obs):
+            def step(self, obs):                       # never called
                 return list(obs['legal_actions'].keys())[0]
+    
         human_agent = HumanProxyAgent()
         ai_agent_1 = dqn_agents[0] if len(dqn_agents) > 0 else LimitholdemRuleAgentV1()
         ai_agent_2 = dqn_agents[1] if len(dqn_agents) > 1 else LimitholdemRuleAgentV1()
-        agents = [human_agent, ai_agent_1, ai_agent_2]
-        env.set_agents(agents)
-        obs = env.step(request.action_id)
-        current_player_id = env.get_player_id()
-        obs, current_player_id = advance_to_human(env, obs, current_player_id, agents)
+        env.set_agents([human_agent, ai_agent_1, ai_agent_2])
+        obs, current_player_id = env.reset()
+        # プレイヤー人数チェック
+        if not hasattr(env.game, 'players') or len(env.game.players) != 3:
+            raise RuntimeError(f"RLCard環境のプレイヤー数が3人ではありません: {len(env.game.players) if hasattr(env.game, 'players') else 'N/A'}")
+        for i, player in enumerate(env.game.players):
+            player.stack = START_BANKROLL
         current_game = {
             'env': env,
             'obs': obs,
             'current_player_id': current_player_id,
-            'agents': agents
+            'stacks': [START_BANKROLL] * 3
         }
-        game_state = convert_game_state(env, obs, current_player_id)
+        # reset直後にAIターンなら自動でAIターンを進める
+        ai_last_actions = {}
+        max_ai_steps = 20
+        ai_step_count = 0
+        while not env.is_over() and current_player_id != 0:
+            ai_step_count += 1
+            print(f"[AI] (start_game) Turn {ai_step_count}, Player {current_player_id}, Stacks: {[p.stack for p in env.game.players]}, Bets: {[p.in_chips for p in env.game.players]}")
+            if ai_step_count > max_ai_steps:
+                print("[AI] Max steps reached, breaking loop")
+                break
+            legal_actions = list(obs['legal_actions'].keys())
+            if not legal_actions:
+                print("[AI] No legal actions, breaking.")
+                break
+            if current_player_id <= len(dqn_agents):
+                agent = dqn_agents[current_player_id - 1]
+                state_vec = extract_state(obs['raw_obs'])
+                ai_action = agent.select_action(state_vec, legal_actions, is_greedy=True)
+                ai_action_name = map_id_to_name(obs, ai_action)
+                ai_last_actions[current_player_id] = ai_action_name
+            else:
+                rule_agent = LimitholdemRuleAgentV1()
+                ai_action_obj = rule_agent.step(obs)
+                ai_action = map_action_to_id(obs, getattr(ai_action_obj, 'name', str(ai_action_obj)))
+                if ai_action is None:
+                    ai_action = legal_actions[0]
+                ai_action_name = map_id_to_name(obs, ai_action)
+                ai_last_actions[current_player_id] = ai_action_name
+            print(f"[AI] (start_game) player={current_player_id}, action={ai_action_name}, stack={[p.stack for p in env.game.players]}, in_chips={[p.in_chips for p in env.game.players]}")
+            obs, current_player_id = env.step(ai_action)
+            # 3人分の情報をprint
+            print(f"[AI] (start_game) after step: stacks={[p.stack for p in env.game.players]}, in_chips={[p.in_chips for p in env.game.players]}, hands={[getattr(p, 'hand', []) for p in env.game.players]}")
+        current_game['obs'] = obs
+        current_game['current_player_id'] = current_player_id
+        game_state = convert_game_state(env, obs, current_player_id, ai_last_actions=ai_last_actions)
         return game_state.model_dump()
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        print(f"Error starting game: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to start game: {str(e)}")
 
 async def handle_ai_turn(env, obs: dict, current_player_id: int, timeout: int = 10) -> Tuple[dict, int, Optional[str]]:
     """AIの行動を処理し、タイムアウトした場合はランダムな合法手を選択"""
@@ -331,8 +362,7 @@ async def make_action(request: ActionRequest):
         # 現在のスタックを保存
         current_stacks = [p.stack for p in env.game.players]
         
-        obs = env.step(action_id)
-        current_player_id = env.get_player_id()
+        obs, current_player_id = env.step(action_id)
         ai_last_actions = {}
         max_ai_steps = 20
         ai_step_count = 0
@@ -411,52 +441,6 @@ async def get_state():
     except Exception as e:
         print(f"Error getting state: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to get state: {str(e)}")
-
-def advance_to_human(env, obs: Dict[str, Any], current_player_id: int, agents):
-    # current_player_id が 0(人間) または ゲーム終了 になるまでループ
-    while not env.is_over() and current_player_id != 0:
-        action_id = agents[current_player_id].step(obs)
-        obs = env.step(action_id)
-        current_player_id = env.get_player_id()
-    return obs, current_player_id
-
-def calc_hand_ranks(state):
-    """treysで役名を算出しリストで返す"""
-    if evaluator is None or TreysCard is None:
-        return ["N/A"] * len(state["players"])
-    comm = [TreysCard.new(c.lower()) for c in state["community_cards"]]
-    ranks = []
-    for p in state["players"]:
-        hole = [TreysCard.new(c.lower()) for c in p["hand"]]
-        rank_int = evaluator.evaluate(hole, comm)
-        rank_name = evaluator.class_to_string(evaluator.get_rank_class(rank_int))
-        ranks.append(rank_name)
-    return ranks
-
-@app.post("/action")
-async def step_action(request: ActionRequest):
-    global current_game
-    if not current_game:
-        raise HTTPException(status_code=400, detail="No active game")
-    env = current_game['env']
-    agents = current_game['agents']
-    # ① 人間アクション（アンパック）
-    obs, current_player_id = env.step(request.action_id)
-    # ② AI ターン自動進行
-    obs, current_player_id = advance_to_human(env, obs, current_player_id, agents)
-
-    # ③ 役判定があれば追加
-    #    （convert_game_state 内でも hand_results を見ていますが、
-    #     必要ならここで state に手役情報を付与してください）
-    #    例: if hasattr(env, '_last_payoffs'): ...
-
-    # ④ 最新ステートを保存
-    current_game['obs'] = obs
-    current_game['current_player_id'] = current_player_id
-
-    # ⑤ GameState に整形して返却
-    game_state = convert_game_state(env, obs, current_player_id)
-    return game_state.dict()
 
 if __name__ == "__main__":
     print("Starting Poker Backend Server...")

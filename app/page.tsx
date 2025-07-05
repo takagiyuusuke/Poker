@@ -206,12 +206,10 @@ function HandResultModal({
   handResult,
   onClose,
   playerNames,
-  startNewGame,
 }: {
   handResult: HandResult | null
   onClose: () => void
   playerNames: string[]
-  startNewGame: () => void
 }) {
   if (!handResult) return null
 
@@ -250,14 +248,8 @@ function HandResultModal({
               </div>
             ))}
           </div>
-          <Button
-            onClick={() => {
-              onClose();
-              startNewGame();
-            }}
-            className="w-full bg-blue-600 hover:bg-blue-700"
-          >
-            Next Hand
+          <Button onClick={onClose} className="w-full bg-blue-600 hover:bg-blue-700">
+            Continue
           </Button>
         </CardContent>
       </Card>
@@ -466,7 +458,7 @@ export default function PokerGame() {
 
           {/* Players Layout */}
           <div className="relative w-full h-[350px]">
-            {(gameState.players || []).map((player, idx) => {
+            {gameState.players.map((player, idx) => {
               // 固定３人分の配置クラス
               const positionClasses = [
                 "absolute top-0 left-8",                            // idx=0: AI1
@@ -605,7 +597,7 @@ export default function PokerGame() {
       </div>
 
       {/* Hand Result Modal */}
-      <HandResultModal handResult={handResult} onClose={() => setHandResult(null)} playerNames={gameState.players?.map((p) => p.name) || []} startNewGame={startNewGame} />
+      <HandResultModal handResult={handResult} onClose={() => setHandResult(null)} playerNames={gameState.players?.map((p) => p.name) || []} />
 
       <style jsx>{`
         @keyframes fadeInOut {
