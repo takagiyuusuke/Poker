@@ -31,6 +31,7 @@ interface GameState {
     winner: number
     payoffs: number[]
     final_stacks: number[]
+    hand_ranks?: string[]
   }
 }
 
@@ -205,52 +206,74 @@ function PlayerActionIndicator({
 function HandResultModal({
   handResult,
   onClose,
-  playerNames,
 }: {
   handResult: HandResult | null
   onClose: () => void
-  playerNames: string[]
 }) {
   if (!handResult) return null
 
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-      <Card className="w-96 bg-gradient-to-br from-yellow-50 to-orange-50 border-yellow-200 shadow-2xl">
-        <CardHeader className="flex flex-row items-center justify-between">
-          <CardTitle className="text-xl font-bold text-gray-800">Hand Complete!</CardTitle>
+    <div className="fixed inset-0 bg-black bg-opacity-60 flex items-center justify-center z-50">
+      <Card className="w-[500px] max-w-[90vw] bg-gradient-to-br from-yellow-50 to-orange-50 border-yellow-200 shadow-2xl">
+        <CardHeader className="flex flex-row items-center justify-between pb-4">
+          <CardTitle className="text-2xl font-bold text-gray-800">Hand Complete!</CardTitle>
           <Button variant="ghost" size="sm" onClick={onClose}>
-            <X className="w-4 h-4" />
+            <X className="w-5 h-5" />
           </Button>
         </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="text-center">
-            <h3 className="text-lg font-semibold text-green-700 mb-2">
-              Winner: {playerNames[handResult.winner]}
+        <CardContent className="space-y-6">
+          {/* Winner Section */}
+          <div className="text-center bg-green-100 p-4 rounded-lg">
+            <h3 className="text-xl font-bold text-green-800 mb-2">
+              🏆 Winner: {handResult.player_names[handResult.winner]}
             </h3>
+            {handResult.hand_ranks && handResult.hand_ranks[handResult.winner] && (
+              <p className="text-green-700 font-medium">Winning Hand: {handResult.hand_ranks[handResult.winner]}</p>
+            )}
           </div>
-          <div className="space-y-2">
-            <h4 className="font-semibold text-gray-700">Results:</h4>
+
+          {/* Results Section */}
+          <div className="space-y-3">
+            <h4 className="font-bold text-gray-800 text-lg border-b pb-2">Hand Results:</h4>
             {handResult.payoffs.map((payoff, index) => (
-              <div key={index} className="flex flex-col p-2 bg-white rounded mb-2">
-                <div className="flex justify-between items-center">
-                  <span className="font-medium">{playerNames[index]}</span>
-                  <div className="flex items-center gap-2">
-                    <span className={`font-bold ${payoff >= 0 ? "text-green-600" : "text-red-600"}`}>
+              <div key={index} className="bg-white p-4 rounded-lg border shadow-sm">
+                <div className="flex justify-between items-start mb-2">
+                  <div className="flex-1">
+                    <span className="font-bold text-lg">{handResult.player_names[index]}</span>
+                    {index === handResult.winner && (
+                      <Badge className="ml-2 bg-yellow-500 text-yellow-900">Winner</Badge>
+                    )}
+                  </div>
+                  <div className="text-right">
+                    <div className={`text-xl font-bold ${payoff >= 0 ? "text-green-600" : "text-red-600"}`}>
                       {payoff >= 0 ? "+" : ""}${payoff}
-                    </span>
-                    <span className="text-sm text-gray-500">(Stack: ${handResult.final_stacks[index]})</span>
+                    </div>
+                    <div className="text-sm text-gray-500">New Stack: ${handResult.final_stacks[index]}</div>
                   </div>
                 </div>
-                {/* 役情報の表示 */}
+
+                {/* Hand Rank Display */}
                 {handResult.hand_ranks && handResult.hand_ranks[index] && (
-                  <div className="text-xs text-gray-700 mt-1">Hand: {handResult.hand_ranks[index]}</div>
+                  <div className="mt-2 pt-2 border-t border-gray-200">
+                    <div className="flex items-center justify-between">
+                      <span className="text-sm text-gray-600">Hand:</span>
+                      <span className="text-sm font-medium text-gray-800">{handResult.hand_ranks[index]}</span>
+                    </div>
+                  </div>
                 )}
               </div>
             ))}
           </div>
-          <Button onClick={onClose} className="w-full bg-blue-600 hover:bg-blue-700">
-            Continue
-          </Button>
+
+          {/* Continue Button */}
+          <div className="pt-4">
+            <Button
+              onClick={onClose}
+              className="w-full bg-blue-600 hover:bg-blue-700 text-white py-3 text-lg font-semibold"
+            >
+              Continue to Next Hand
+            </Button>
+          </div>
         </CardContent>
       </Card>
     </div>
@@ -310,12 +333,14 @@ export default function PokerGame() {
         })
       }
 
+      // ハンド結果の処理
       if (data.hand_results && gameState.players) {
         setHandResult({
           winner: data.hand_results.winner,
           payoffs: data.hand_results.payoffs,
           final_stacks: data.hand_results.final_stacks,
           player_names: gameState.players.map((p) => p.name),
+          hand_ranks: data.hand_results.hand_ranks || [],
         })
       }
 
@@ -343,13 +368,14 @@ export default function PokerGame() {
         })
       }
 
-      // Check if hand just completed
+      // ハンド結果の処理
       if (data.hand_results && !handResult && gameState.players) {
         setHandResult({
           winner: data.hand_results.winner,
           payoffs: data.hand_results.payoffs,
           final_stacks: data.hand_results.final_stacks,
           player_names: gameState.players.map((p) => p.name),
+          hand_ranks: data.hand_results.hand_ranks || [],
         })
       }
 
@@ -357,6 +383,14 @@ export default function PokerGame() {
     } catch (error) {
       console.error("Failed to poll game state:", error)
     }
+  }
+
+  const handleHandResultClose = () => {
+    setHandResult(null)
+    // モーダルを閉じた後、少し待ってから次のハンドの状態を取得
+    setTimeout(() => {
+      pollGameState()
+    }, 500)
   }
 
   useEffect(() => {
@@ -376,7 +410,7 @@ export default function PokerGame() {
         const timeout = setTimeout(() => {
           setPlayerActions((prev) => {
             const newActions = { ...prev }
-            delete newActions[parseInt(playerId)]
+            delete newActions[Number.parseInt(playerId)]
             return newActions
           })
         }, remainingTime)
@@ -428,7 +462,10 @@ export default function PokerGame() {
           <div className="flex justify-center gap-6 text-white text-sm">
             <div className="flex items-center gap-2">
               <Clock className="w-4 h-4" />
-              <span>Stage: {gameState.stage ? gameState.stage.charAt(0).toUpperCase() + gameState.stage.slice(1) : "Unknown"}</span>
+              <span>
+                Stage:{" "}
+                {gameState.stage ? gameState.stage.charAt(0).toUpperCase() + gameState.stage.slice(1) : "Unknown"}
+              </span>
             </div>
             <div className="flex items-center gap-2">
               <Coins className="w-4 h-4" />
@@ -461,11 +498,11 @@ export default function PokerGame() {
             {gameState.players.map((player, idx) => {
               // 固定３人分の配置クラス
               const positionClasses = [
-                "absolute top-0 left-8",                            // idx=0: AI1
-                "absolute top-0 right-8",                           // idx=1: AI2
-                "absolute bottom-0 left-1/2 transform -translate-x-1/2" // idx=2: You
-              ];
-              const isAI = !player.is_human;
+                "absolute top-0 left-8", // idx=0: AI1
+                "absolute top-0 right-8", // idx=1: AI2
+                "absolute bottom-0 left-1/2 transform -translate-x-1/2", // idx=2: You
+              ]
+              const isAI = !player.is_human
               // カード隠しやバッジ色なども idx で使い分け
               return (
                 <div key={player.id} className={positionClasses[idx]}>
@@ -489,14 +526,11 @@ export default function PokerGame() {
                           {/* プレイヤー名 */}
                           <h4
                             className={`font-bold text-sm ${
-                              isAI
-                                ? idx === 0
-                                  ? "text-blue-800"
-                                  : "text-purple-800"
-                                : "text-green-800"
+                              isAI ? (idx === 0 ? "text-blue-800" : "text-purple-800") : "text-green-800"
                             }`}
                           >
-                            {player.name}{!player.is_human && ""}
+                            {player.name}
+                            {!player.is_human && ""}
                             {player.is_human && " (You)"}
                           </h4>
                           {/* 手札 */}
@@ -522,11 +556,7 @@ export default function PokerGame() {
                           {gameState.current_player === idx && (
                             <Badge
                               className={`text-xs ${
-                                isAI
-                                  ? idx === 0
-                                    ? "bg-blue-600"
-                                    : "bg-purple-600"
-                                  : "bg-green-600"
+                                isAI ? (idx === 0 ? "bg-blue-600" : "bg-purple-600") : "bg-green-600"
                               }`}
                             >
                               {player.is_human ? "Your Turn" : "Current"}
@@ -537,9 +567,9 @@ export default function PokerGame() {
                     </Card>
                   </div>
                 </div>
-              );
+              )
             })}
-          </div>  
+          </div>
 
           {/* Action Buttons and Q-Values */}
           {isPlayerTurn && !gameState.game_over && (
@@ -597,7 +627,7 @@ export default function PokerGame() {
       </div>
 
       {/* Hand Result Modal */}
-      <HandResultModal handResult={handResult} onClose={() => setHandResult(null)} playerNames={gameState.players?.map((p) => p.name) || []} />
+      <HandResultModal handResult={handResult} onClose={handleHandResultClose} />
 
       <style jsx>{`
         @keyframes fadeInOut {
