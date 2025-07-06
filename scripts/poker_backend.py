@@ -327,40 +327,9 @@ async def start_game():
         
         # reset直後にAIターンなら自動でAIターンを進める
         ai_last_actions = {}
-        max_ai_steps = 20
-        ai_step_count = 0
-        
-        while not env.is_over() and current_player_id != 0:
-            ai_step_count += 1
-            print(f"[AI] (start_game) Turn {ai_step_count}, Player {current_player_id}, Stacks: {[p.stack for p in env.game.players]}, Bets: {[p.in_chips for p in env.game.players]}")
-            
-            if ai_step_count > max_ai_steps:
-                print("[AI] Max steps reached, breaking loop")
-                break
-                
-            legal_actions = list(obs['legal_actions'].keys())
-            if not legal_actions:
-                print("[AI] No legal actions, breaking.")
-                break
-                
-            if current_player_id <= len(dqn_agents):
-                agent = dqn_agents[current_player_id - 1]
-                state_vec = extract_state(obs['raw_obs'])
-                ai_action = agent.select_action(state_vec, legal_actions, is_greedy=True)
-                ai_action_name = map_id_to_name(obs, ai_action)
-                ai_last_actions[current_player_id] = ai_action_name
-            else:
-                rule_agent = LimitholdemRuleAgentV1()
-                ai_action_obj = rule_agent.step(obs)
-                ai_action = map_action_to_id(obs, getattr(ai_action_obj, 'name', str(ai_action_obj)))
-                if ai_action is None:
-                    ai_action = legal_actions[0]
-                ai_action_name = map_id_to_name(obs, ai_action)
-                ai_last_actions[current_player_id] = ai_action_name
-                
-            print(f"[AI] (start_game) player={current_player_id}, action={ai_action_name}, stack={[p.stack for p in env.game.players]}, in_chips={[p.in_chips for p in env.game.players]}")
-            obs, current_player_id = env.step(ai_action)
-            print(f"[AI] (start_game) after step: stacks={[p.stack for p in env.game.players]}, in_chips={[p.in_chips for p in env.game.players]}, hands={[getattr(p, 'hand', []) for p in env.game.players]}")
+        obs, current_player_id, ai_last_actions = advance_ai_turns(
+            env, obs, current_player_id, context="start_game", ai_last_actions=ai_last_actions
+        )
         
         # ハンドが終了していれば結果を保存
         if env.is_over():
@@ -443,6 +412,67 @@ async def handle_ai_turn(env, obs: dict, current_player_id: int, timeout: int = 
         new_obs, new_player_id = env.step(random_action)
         return new_obs, new_player_id, random_action_name
 
+def advance_ai_turns(env, obs: dict, current_player_id: int, *, context: str = "", ai_last_actions=None, max_steps: int = 20) -> Tuple[dict, int, Dict[int, str]]:
+    """Advance AI turns until it's the human player's turn or the hand ends."""
+    if ai_last_actions is None:
+        ai_last_actions = {}
+
+    step_count = 0
+    prev_state = None
+
+    while not env.is_over() and current_player_id != 0:
+        step_count += 1
+        print(
+            f"[AI] ({context}) Turn {step_count}, Player {current_player_id}, "
+            f"Stacks: {[p.stack for p in env.game.players]}, Bets: {[p.in_chips for p in env.game.players]}"
+        )
+
+        if step_count > max_steps:
+            print("[AI] Max steps reached, breaking loop")
+            break
+
+        current_state = (
+            current_player_id,
+            [p.stack for p in env.game.players],
+            [p.in_chips for p in env.game.players],
+        )
+        if current_state == prev_state:
+            print("[AI] Detected state loop, breaking")
+            break
+        prev_state = current_state
+
+        legal_actions = list(obs["legal_actions"].keys())
+        if not legal_actions:
+            print("[AI] No legal actions, breaking.")
+            break
+
+        if current_player_id <= len(dqn_agents):
+            agent = dqn_agents[current_player_id - 1]
+            state_vec = extract_state(obs["raw_obs"])
+            ai_action = agent.select_action(state_vec, legal_actions, is_greedy=True)
+            ai_action_name = map_id_to_name(obs, ai_action)
+            ai_last_actions[current_player_id] = ai_action_name
+        else:
+            rule_agent = LimitholdemRuleAgentV1()
+            ai_action_obj = rule_agent.step(obs)
+            ai_action = map_action_to_id(obs, getattr(ai_action_obj, "name", str(ai_action_obj)))
+            if ai_action is None:
+                ai_action = legal_actions[0]
+            ai_action_name = map_id_to_name(obs, ai_action)
+            ai_last_actions[current_player_id] = ai_action_name
+
+        print(
+            f"[AI] ({context}) player={current_player_id}, action={ai_action_name}, "
+            f"stack={[p.stack for p in env.game.players]}, in_chips={[p.in_chips for p in env.game.players]}"
+        )
+        obs, current_player_id = env.step(ai_action)
+        print(
+            f"[AI] ({context}) after step: stacks={[p.stack for p in env.game.players]}, "
+            f"in_chips={[p.in_chips for p in env.game.players]}, hands={[getattr(p, 'hand', []) for p in env.game.players]}"
+        )
+
+    return obs, current_player_id, ai_last_actions
+
 @app.post("/make_action")
 async def make_action(request: ActionRequest):
     global current_game
@@ -523,6 +553,11 @@ async def make_action(request: ActionRequest):
                 for i, player in enumerate(env.game.players):
                     player.stack = saved_stacks[i]
                 print(f"[NEW_HAND] Restored stacks: {[p.stack for p in env.game.players]}")
+                # 新しいハンド開始直後にAIターンなら進める
+                obs, current_player_id, new_ai_actions = advance_ai_turns(
+                    env, obs, current_player_id, context="new_hand", ai_last_actions=ai_last_actions
+                )
+                ai_last_actions.update(new_ai_actions)
 
         current_game['obs'] = obs
         current_game['current_player_id'] = current_player_id
