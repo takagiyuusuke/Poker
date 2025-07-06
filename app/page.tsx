@@ -233,9 +233,7 @@ function HandResultModal({
             <h3 className="text-xl font-bold text-green-800 mb-2">
               🏆 Winner: {handResult.player_names[handResult.winner]}
             </h3>
-            {handResult.hand_ranks && handResult.hand_ranks[handResult.winner] && (
-              <p className="text-green-700 font-medium">Winning Hand: {handResult.hand_ranks[handResult.winner]}</p>
-            )}
+            {/* Winning hand is no longer shown */}
           </div>
 
           {/* Community Cards */}
@@ -249,41 +247,43 @@ function HandResultModal({
           {/* Results Section */}
           <div className="space-y-3">
             <h4 className="font-bold text-gray-800 text-lg border-b pb-2">Hand Results:</h4>
-            {handResult.payoffs.map((payoff, index) => (
-              <div key={index} className="bg-white p-4 rounded-lg border shadow-sm">
-                <div className="flex justify-between items-start mb-2">
-                  <div className="flex-1">
-                    <span className="font-bold text-lg">{handResult.player_names[index]}</span>
-                    {index === handResult.winner && (
-                      <Badge className="ml-2 bg-yellow-500 text-yellow-900">Winner</Badge>
-                    )}
-                    {handResult.folded && handResult.folded[index] && (
-                      <Badge variant="destructive" className="ml-2">Folded</Badge>
-                    )}
-                  </div>
-                  <div className="text-right">
-                    <div className={`text-xl font-bold ${payoff >= 0 ? "text-green-600" : "text-red-600"}`}> 
-                      {payoff >= 0 ? "+" : ""}
-                      {payoff}
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              {handResult.payoffs.map((payoff, index) => (
+                <div key={index} className="bg-white p-4 rounded-lg border shadow-sm">
+                  <div className="flex justify-between items-start mb-2">
+                    <div className="flex-1">
+                      <span className="font-bold text-lg">{handResult.player_names[index]}</span>
+                      {index === handResult.winner && (
+                        <Badge className="ml-2 bg-yellow-500 text-yellow-900">Winner</Badge>
+                      )}
+                      {handResult.folded && handResult.folded[index] && (
+                        <Badge variant="destructive" className="ml-2">Folded</Badge>
+                      )}
                     </div>
-                    <div className="text-sm text-gray-500">New Stack: {"$" + handResult.final_stacks[index]}</div>
+                    <div className="text-right">
+                      <div className={`text-xl font-bold ${payoff >= 0 ? "text-green-600" : "text-red-600"}`}>
+                        {payoff >= 0 ? "+" : ""}
+                        {payoff}
+                      </div>
+                      <div className="text-sm text-gray-500">New Stack: {"$" + handResult.final_stacks[index]}</div>
+                    </div>
                   </div>
-                </div>
 
-                {/* Hand Rank Display */}
-                {handResult.hand_ranks && handResult.hand_ranks[index] && (
-                  <div className="mt-2 pt-2 border-t border-gray-200">
-                    <div className="flex items-center justify-between mb-2">
-                      <span className="text-sm text-gray-600">Hand:</span>
-                      <span className="text-sm font-medium text-gray-800">{handResult.hand_ranks[index]}</span>
+                  {/* Hand Rank Display */}
+                  {handResult.hand_ranks && handResult.hand_ranks[index] && (
+                    <div className="mt-2 pt-2 border-t border-gray-200">
+                      <div className="flex items-center justify-between mb-2">
+                        <span className="text-sm text-gray-600">Hand:</span>
+                        <span className="text-sm font-medium text-gray-800">{handResult.hand_ranks[index]}</span>
+                      </div>
+                      {handResult.player_hands && handResult.player_hands[index] && (
+                        <CardDisplay cards={handResult.player_hands[index]} />
+                      )}
                     </div>
-                    {handResult.player_hands && handResult.player_hands[index] && (
-                      <CardDisplay cards={handResult.player_hands[index]} />
-                    )}
-                  </div>
-                )}
-              </div>
-            ))}
+                  )}
+                </div>
+              ))}
+            </div>
           </div>
 
           {/* Continue Button */}
@@ -485,7 +485,6 @@ export default function PokerGame() {
       <div className="max-w-6xl mx-auto">
         {/* Game Info Header */}
         <div className="text-center mb-4">
-          <h1 className="text-2xl font-bold text-white mb-2">Texas Hold'em Poker</h1>
           <div className="flex justify-center gap-6 text-white text-sm">
             <div className="flex items-center gap-2">
               <Clock className="w-4 h-4" />
