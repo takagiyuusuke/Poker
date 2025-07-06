@@ -115,7 +115,7 @@ function ChipStack({ amount, size = "md" }: { amount: number; size?: "sm" | "md"
         className="text-xs font-bold text-center min-w-12 bg-black bg-opacity-70 text-white px-2 py-1 rounded z-20 relative"
         style={{ marginTop: `${chipCount * 1.5 + 4}px` }}
       >
-        ${amount}
+        {"$" + amount}
       </div>
     </div>
   )
@@ -246,9 +246,10 @@ function HandResultModal({
                   </div>
                   <div className="text-right">
                     <div className={`text-xl font-bold ${payoff >= 0 ? "text-green-600" : "text-red-600"}`}>
-                      {payoff >= 0 ? "+" : ""}${payoff}
+                      {payoff >= 0 ? "+" : ""}
+                      {payoff}
                     </div>
-                    <div className="text-sm text-gray-500">New Stack: ${handResult.final_stacks[index]}</div>
+                    <div className="text-sm text-gray-500">New Stack: {"$" + handResult.final_stacks[index]}</div>
                   </div>
                 </div>
 
@@ -469,7 +470,7 @@ export default function PokerGame() {
             </div>
             <div className="flex items-center gap-2">
               <Coins className="w-4 h-4" />
-              <span>Pot: ${gameState.pot}</span>
+              <span>Pot: {"$" + gameState.pot}</span>
             </div>
             <span>Current: {gameState.players?.[gameState.current_player]?.name}</span>
           </div>
