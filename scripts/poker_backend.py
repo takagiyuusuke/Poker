@@ -125,48 +125,38 @@ def is_hand_over(env) -> bool:
     """Check if the current hand is over."""
     return env.is_over()
 
-def get_hand_rank_name(rank_id):
-    """Convert hand rank ID to readable name."""
+def get_hand_rank_name(rank_id: int) -> str:
+    """Convert RLCard hand rank ID to a human readable name."""
     hand_ranks = {
-        0: "High Card",
-        1: "One Pair", 
-        2: "Two Pair",
-        3: "Three of a Kind",
-        4: "Straight",
-        5: "Flush",
-        6: "Full House",
-        7: "Four of a Kind",
-        8: "Straight Flush",
-        9: "Royal Flush"
+        1: "High Card",
+        2: "One Pair",
+        3: "Two Pair",
+        4: "Three of a Kind",
+        5: "Straight",
+        6: "Flush",
+        7: "Full House",
+        8: "Four of a Kind",
+        9: "Straight Flush",
     }
+
     return hand_ranks.get(rank_id, f"Unknown Rank ({rank_id})")
 
 def get_player_hand_rank(env, player_id):
-    """Get player's hand rank information."""
+    """Return player's hand rank as a string."""
     try:
-        # RLCardの手札評価システムを使用
-        if hasattr(env.game, 'judger') and hasattr(env.game.judger, 'judge_game'):
-            # ゲーム終了時の手札評価を取得
-            if env.is_over():
-                # プレイヤーの手札とコミュニティカードを組み合わせて評価
-                player = env.game.players[player_id]
-                if hasattr(player, 'hand') and player.hand:
-                    # 手札の強さを数値で取得
-                    if hasattr(env.game, 'winner') and hasattr(env.game.winner, 'hand_rank'):
-                        return get_hand_rank_name(env.game.winner[player_id].hand_rank)
-                    
-                    # 代替方法: RLCardの内部評価システムを使用
-                    from rlcard.games.limitholdem.utils import evaluate_hand
-                    if hasattr(env.game, 'public_cards') and env.game.public_cards:
-                        all_cards = player.hand + env.game.public_cards
-                        if len(all_cards) >= 5:
-                            # 手札評価（簡易版）
-                            hand_info = evaluate_hand(all_cards)
-                            if isinstance(hand_info, tuple) and len(hand_info) > 0:
-                                return get_hand_rank_name(hand_info[0])
+        if env.is_over() and hasattr(env.game, 'public_cards'):
+            player = env.game.players[player_id]
+            if hasattr(player, 'hand') and player.hand:
+                from rlcard.games.limitholdem.utils import Hand
+
+                cards = [str(c) for c in player.hand + env.game.public_cards]
+                if len(cards) == 7:
+                    hand = Hand(cards)
+                    hand.evaluateHand()
+                    return get_hand_rank_name(int(hand.category))
     except Exception as e:
         print(f"Error getting hand rank for player {player_id}: {e}")
-    
+
     # デフォルト値
     return "Unknown Hand"
 
