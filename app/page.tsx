@@ -220,7 +220,7 @@ function HandResultModal({
 
   return (
     <div className="fixed inset-0 bg-black bg-opacity-60 flex items-center justify-center z-50">
-      <Card className="w-[500px] max-w-[90vw] bg-gradient-to-br from-yellow-50 to-orange-50 border-yellow-200 shadow-2xl">
+      <Card className="w-[700px] max-w-[95vw] bg-gradient-to-br from-yellow-50 to-orange-50 border-yellow-200 shadow-2xl">
         <CardHeader className="flex flex-row items-center justify-between pb-4">
           <CardTitle className="text-2xl font-bold text-gray-800">Hand Complete!</CardTitle>
           <Button variant="ghost" size="sm" onClick={onClose}>
@@ -247,7 +247,7 @@ function HandResultModal({
           {/* Results Section */}
           <div className="space-y-3">
             <h4 className="font-bold text-gray-800 text-lg border-b pb-2">Hand Results:</h4>
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div className="grid grid-cols-3 gap-4">
               {handResult.payoffs.map((payoff, index) => (
                 <div key={index} className="bg-white p-4 rounded-lg border shadow-sm">
                   <div className="flex justify-between items-start mb-2">
@@ -278,6 +278,9 @@ function HandResultModal({
                       </div>
                       {handResult.player_hands && handResult.player_hands[index] && (
                         <CardDisplay cards={handResult.player_hands[index]} />
+                      )}
+                      {handResult.folded && handResult.folded[index] && (
+                        <p className="text-center text-sm text-red-600 font-semibold mt-1">Folded</p>
                       )}
                     </div>
                   )}
