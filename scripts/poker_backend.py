@@ -154,8 +154,14 @@ def get_player_hand_rank(env, player_id):
                 from rlcard.games.limitholdem.utils import Hand
 
                 def to_eval_str(c):
-                    # Hand evaluator expects suit first (e.g., 'SA')
-                    return f"{c.suit}{c.rank}" if hasattr(c, 'suit') and hasattr(c, 'rank') else str(c)
+                    """Return a card string in suit-first format for evaluation."""
+                    if hasattr(c, "suit") and hasattr(c, "rank"):
+                        return f"{c.suit}{c.rank}"
+                    c = str(c)
+                    # Convert rank-first strings like "AS" to "SA"
+                    if len(c) == 2 and c[0] in "23456789TJQKA" and c[1] in "CDHS":
+                        return f"{c[1]}{c[0]}"
+                    return c
 
                 cards = [to_eval_str(c) for c in player.hand + env.game.public_cards]
                 if len(cards) == 7:
@@ -359,7 +365,8 @@ async def start_game():
         # ハンドが終了していれば結果を保存
         if env.is_over():
             payoffs = env.get_payoffs()
-            env._last_payoffs = payoffs
+            payoffs_list = payoffs.tolist() if hasattr(payoffs, "tolist") else list(payoffs)
+            env._last_payoffs = payoffs_list
 
             # スタック更新
             for i, player in enumerate(env.game.players):
@@ -370,7 +377,7 @@ async def start_game():
             global last_hand_results
             last_hand_results = {
                 "winner": detect_winner(env) if detect_winner(env) is not None else 0,
-                "payoffs": payoffs,
+                "payoffs": payoffs_list,
                 "final_stacks": [p.stack for p in env.game.players],
                 "hand_ranks": hand_ranks,
             }
@@ -481,7 +488,8 @@ async def make_action(request: ActionRequest):
 
         if env.is_over():
             payoffs = env.get_payoffs()
-            env._last_payoffs = payoffs
+            payoffs_list = payoffs.tolist() if hasattr(payoffs, "tolist") else list(payoffs)
+            env._last_payoffs = payoffs_list
 
             print(f"[HAND_END] Payoffs: {payoffs}")
             print(f"[HAND_END] Current stacks: {current_stacks}")
@@ -502,7 +510,7 @@ async def make_action(request: ActionRequest):
             global last_hand_results
             last_hand_results = {
                 "winner": detect_winner(env) if detect_winner(env) is not None else 0,
-                "payoffs": payoffs,
+                "payoffs": payoffs_list,
                 "final_stacks": [p.stack for p in env.game.players],
                 "hand_ranks": hand_ranks,
             }
