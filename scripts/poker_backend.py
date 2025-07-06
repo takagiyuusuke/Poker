@@ -43,6 +43,10 @@ app.add_middleware(
 # Global game state
 current_game = None
 dqn_agents = []
+# Keep results of the most recently finished hand so the frontend can
+# display them even after the environment has been reset for the next
+# hand.
+last_hand_results = None
 
 class ActionRequest(BaseModel):
     action_id: int
@@ -125,48 +129,48 @@ def is_hand_over(env) -> bool:
     """Check if the current hand is over."""
     return env.is_over()
 
-def get_hand_rank_name(rank_id):
-    """Convert hand rank ID to readable name."""
+def get_hand_rank_name(rank_id: int) -> str:
+    """Convert RLCard hand rank ID to a human readable name."""
     hand_ranks = {
-        0: "High Card",
-        1: "One Pair", 
-        2: "Two Pair",
-        3: "Three of a Kind",
-        4: "Straight",
-        5: "Flush",
-        6: "Full House",
-        7: "Four of a Kind",
-        8: "Straight Flush",
-        9: "Royal Flush"
+        1: "High Card",
+        2: "One Pair",
+        3: "Two Pair",
+        4: "Three of a Kind",
+        5: "Straight",
+        6: "Flush",
+        7: "Full House",
+        8: "Four of a Kind",
+        9: "Straight Flush",
     }
+
     return hand_ranks.get(rank_id, f"Unknown Rank ({rank_id})")
 
 def get_player_hand_rank(env, player_id):
-    """Get player's hand rank information."""
+    """Return player's hand rank as a string."""
     try:
-        # RLCardの手札評価システムを使用
-        if hasattr(env.game, 'judger') and hasattr(env.game.judger, 'judge_game'):
-            # ゲーム終了時の手札評価を取得
-            if env.is_over():
-                # プレイヤーの手札とコミュニティカードを組み合わせて評価
-                player = env.game.players[player_id]
-                if hasattr(player, 'hand') and player.hand:
-                    # 手札の強さを数値で取得
-                    if hasattr(env.game, 'winner') and hasattr(env.game.winner, 'hand_rank'):
-                        return get_hand_rank_name(env.game.winner[player_id].hand_rank)
-                    
-                    # 代替方法: RLCardの内部評価システムを使用
-                    from rlcard.games.limitholdem.utils import evaluate_hand
-                    if hasattr(env.game, 'public_cards') and env.game.public_cards:
-                        all_cards = player.hand + env.game.public_cards
-                        if len(all_cards) >= 5:
-                            # 手札評価（簡易版）
-                            hand_info = evaluate_hand(all_cards)
-                            if isinstance(hand_info, tuple) and len(hand_info) > 0:
-                                return get_hand_rank_name(hand_info[0])
+        if env.is_over() and hasattr(env.game, 'public_cards'):
+            player = env.game.players[player_id]
+            if hasattr(player, 'hand') and player.hand:
+                from rlcard.games.limitholdem.utils import Hand
+
+                def to_eval_str(c):
+                    """Return a card string in suit-first format for evaluation."""
+                    if hasattr(c, "suit") and hasattr(c, "rank"):
+                        return f"{c.suit}{c.rank}"
+                    c = str(c)
+                    # Convert rank-first strings like "AS" to "SA"
+                    if len(c) == 2 and c[0] in "23456789TJQKA" and c[1] in "CDHS":
+                        return f"{c[1]}{c[0]}"
+                    return c
+
+                cards = [to_eval_str(c) for c in player.hand + env.game.public_cards]
+                if len(cards) == 7:
+                    hand = Hand(cards)
+                    hand.evaluateHand()
+                    return get_hand_rank_name(int(hand.category))
     except Exception as e:
         print(f"Error getting hand rank for player {player_id}: {e}")
-    
+
     # デフォルト値
     return "Unknown Hand"
 
@@ -230,12 +234,18 @@ def convert_game_state(env, obs: dict, current_player_id: int, ai_last_actions=N
             agent = dqn_agents[current_player_id] if current_player_id < len(dqn_agents) else dqn_agents[0]
             q_values, recommended_action = get_q_values_and_recommendation(agent, obs)
         
+        global last_hand_results
+
         winner = detect_winner(env)
         hand_over = is_hand_over(env)
         game_over = hand_over and any(p["stack"] <= 0 for p in players)
-        
+
         hand_results = None
-        if hand_over and hasattr(env, '_last_payoffs'):
+        if last_hand_results:
+            hand_results = last_hand_results
+            hand_over = True
+            last_hand_results = None
+        elif hand_over and hasattr(env, '_last_payoffs'):
             # 各プレイヤーの手札の強さを取得
             hand_ranks = []
             for i in range(3):
@@ -317,41 +327,36 @@ async def start_game():
         
         # reset直後にAIターンなら自動でAIターンを進める
         ai_last_actions = {}
-        max_ai_steps = 20
-        ai_step_count = 0
+        obs, current_player_id, ai_last_actions = advance_ai_turns(
+            env, obs, current_player_id, context="start_game", ai_last_actions=ai_last_actions
+        )
         
-        while not env.is_over() and current_player_id != 0:
-            ai_step_count += 1
-            print(f"[AI] (start_game) Turn {ai_step_count}, Player {current_player_id}, Stacks: {[p.stack for p in env.game.players]}, Bets: {[p.in_chips for p in env.game.players]}")
-            
-            if ai_step_count > max_ai_steps:
-                print("[AI] Max steps reached, breaking loop")
-                break
-                
-            legal_actions = list(obs['legal_actions'].keys())
-            if not legal_actions:
-                print("[AI] No legal actions, breaking.")
-                break
-                
-            if current_player_id <= len(dqn_agents):
-                agent = dqn_agents[current_player_id - 1]
-                state_vec = extract_state(obs['raw_obs'])
-                ai_action = agent.select_action(state_vec, legal_actions, is_greedy=True)
-                ai_action_name = map_id_to_name(obs, ai_action)
-                ai_last_actions[current_player_id] = ai_action_name
-            else:
-                rule_agent = LimitholdemRuleAgentV1()
-                ai_action_obj = rule_agent.step(obs)
-                ai_action = map_action_to_id(obs, getattr(ai_action_obj, 'name', str(ai_action_obj)))
-                if ai_action is None:
-                    ai_action = legal_actions[0]
-                ai_action_name = map_id_to_name(obs, ai_action)
-                ai_last_actions[current_player_id] = ai_action_name
-                
-            print(f"[AI] (start_game) player={current_player_id}, action={ai_action_name}, stack={[p.stack for p in env.game.players]}, in_chips={[p.in_chips for p in env.game.players]}")
-            obs, current_player_id = env.step(ai_action)
-            print(f"[AI] (start_game) after step: stacks={[p.stack for p in env.game.players]}, in_chips={[p.in_chips for p in env.game.players]}, hands={[getattr(p, 'hand', []) for p in env.game.players]}")
-        
+        # ハンドが終了していれば結果を保存
+        if env.is_over():
+            payoffs = env.get_payoffs()
+            payoffs_list = payoffs.tolist() if hasattr(payoffs, "tolist") else list(payoffs)
+            env._last_payoffs = payoffs_list
+
+            # スタック更新
+            for i, player in enumerate(env.game.players):
+                player.stack += payoffs[i]
+
+            hand_ranks = [get_player_hand_rank(env, i) for i in range(3)]
+
+            global last_hand_results
+            last_hand_results = {
+                "winner": detect_winner(env) if detect_winner(env) is not None else 0,
+                "payoffs": payoffs_list,
+                "final_stacks": [p.stack for p in env.game.players],
+                "hand_ranks": hand_ranks,
+            }
+
+            if not any(p.stack <= 0 for p in env.game.players):
+                saved = [p.stack for p in env.game.players]
+                obs, current_player_id = env.reset()
+                for i, player in enumerate(env.game.players):
+                    player.stack = saved[i]
+
         current_game['obs'] = obs
         current_game['current_player_id'] = current_player_id
         game_state = convert_game_state(env, obs, current_player_id, ai_last_actions=ai_last_actions)
@@ -407,6 +412,67 @@ async def handle_ai_turn(env, obs: dict, current_player_id: int, timeout: int = 
         new_obs, new_player_id = env.step(random_action)
         return new_obs, new_player_id, random_action_name
 
+def advance_ai_turns(env, obs: dict, current_player_id: int, *, context: str = "", ai_last_actions=None, max_steps: int = 20) -> Tuple[dict, int, Dict[int, str]]:
+    """Advance AI turns until it's the human player's turn or the hand ends."""
+    if ai_last_actions is None:
+        ai_last_actions = {}
+
+    step_count = 0
+    prev_state = None
+
+    while not env.is_over() and current_player_id != 0:
+        step_count += 1
+        print(
+            f"[AI] ({context}) Turn {step_count}, Player {current_player_id}, "
+            f"Stacks: {[p.stack for p in env.game.players]}, Bets: {[p.in_chips for p in env.game.players]}"
+        )
+
+        if step_count > max_steps:
+            print("[AI] Max steps reached, breaking loop")
+            break
+
+        current_state = (
+            current_player_id,
+            [p.stack for p in env.game.players],
+            [p.in_chips for p in env.game.players],
+        )
+        if current_state == prev_state:
+            print("[AI] Detected state loop, breaking")
+            break
+        prev_state = current_state
+
+        legal_actions = list(obs["legal_actions"].keys())
+        if not legal_actions:
+            print("[AI] No legal actions, breaking.")
+            break
+
+        if current_player_id <= len(dqn_agents):
+            agent = dqn_agents[current_player_id - 1]
+            state_vec = extract_state(obs["raw_obs"])
+            ai_action = agent.select_action(state_vec, legal_actions, is_greedy=True)
+            ai_action_name = map_id_to_name(obs, ai_action)
+            ai_last_actions[current_player_id] = ai_action_name
+        else:
+            rule_agent = LimitholdemRuleAgentV1()
+            ai_action_obj = rule_agent.step(obs)
+            ai_action = map_action_to_id(obs, getattr(ai_action_obj, "name", str(ai_action_obj)))
+            if ai_action is None:
+                ai_action = legal_actions[0]
+            ai_action_name = map_id_to_name(obs, ai_action)
+            ai_last_actions[current_player_id] = ai_action_name
+
+        print(
+            f"[AI] ({context}) player={current_player_id}, action={ai_action_name}, "
+            f"stack={[p.stack for p in env.game.players]}, in_chips={[p.in_chips for p in env.game.players]}"
+        )
+        obs, current_player_id = env.step(ai_action)
+        print(
+            f"[AI] ({context}) after step: stacks={[p.stack for p in env.game.players]}, "
+            f"in_chips={[p.in_chips for p in env.game.players]}, hands={[getattr(p, 'hand', []) for p in env.game.players]}"
+        )
+
+    return obs, current_player_id, ai_last_actions
+
 @app.post("/make_action")
 async def make_action(request: ActionRequest):
     global current_game
@@ -452,11 +518,12 @@ async def make_action(request: ActionRequest):
 
         if env.is_over():
             payoffs = env.get_payoffs()
-            env._last_payoffs = payoffs
-            
+            payoffs_list = payoffs.tolist() if hasattr(payoffs, "tolist") else list(payoffs)
+            env._last_payoffs = payoffs_list
+
             print(f"[HAND_END] Payoffs: {payoffs}")
             print(f"[HAND_END] Current stacks: {current_stacks}")
-            
+
             # スタックの更新と保存
             for i, player in enumerate(env.game.players):
                 old_stack = current_stacks[i]
@@ -464,16 +531,33 @@ async def make_action(request: ActionRequest):
                 if player.stack < 0:
                     player.stack = 0
                 print(f"[HAND_END] Player {i}: {old_stack} + {payoffs[i]} = {player.stack}")
-            
+
+            # 手札評価
+            hand_ranks = []
+            for i in range(3):
+                hand_ranks.append(get_player_hand_rank(env, i))
+
+            global last_hand_results
+            last_hand_results = {
+                "winner": detect_winner(env) if detect_winner(env) is not None else 0,
+                "payoffs": payoffs_list,
+                "final_stacks": [p.stack for p in env.game.players],
+                "hand_ranks": hand_ranks,
+            }
+
             # 新しいハンドの開始（誰も破産していない場合）
             if not any(p.stack <= 0 for p in env.game.players):
                 saved_stacks = [p.stack for p in env.game.players]
                 print(f"[NEW_HAND] Starting new hand with stacks: {saved_stacks}")
                 obs, current_player_id = env.reset()
-                # スタックを復元
                 for i, player in enumerate(env.game.players):
                     player.stack = saved_stacks[i]
                 print(f"[NEW_HAND] Restored stacks: {[p.stack for p in env.game.players]}")
+                # 新しいハンド開始直後にAIターンなら進める
+                obs, current_player_id, new_ai_actions = advance_ai_turns(
+                    env, obs, current_player_id, context="new_hand", ai_last_actions=ai_last_actions
+                )
+                ai_last_actions.update(new_ai_actions)
 
         current_game['obs'] = obs
         current_game['current_player_id'] = current_player_id
