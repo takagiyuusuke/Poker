@@ -32,6 +32,9 @@ interface GameState {
     payoffs: number[]
     final_stacks: number[]
     hand_ranks?: string[]
+    community_cards?: string[]
+    player_hands?: string[][]
+    folded?: boolean[]
   }
 }
 
@@ -41,6 +44,9 @@ interface HandResult {
   final_stacks: number[]
   player_names: string[]
   hand_ranks?: string[]
+  community_cards?: string[]
+  player_hands?: string[][]
+  folded?: boolean[]
 }
 
 const SUIT_SYMBOLS = { C: "♣", D: "♦", H: "♥", S: "♠" }
@@ -232,6 +238,14 @@ function HandResultModal({
             )}
           </div>
 
+          {/* Community Cards */}
+          {handResult.community_cards && handResult.community_cards.length > 0 && (
+            <div className="text-center">
+              <h4 className="font-bold text-gray-800 text-lg mb-2">Community Cards</h4>
+              <CardDisplay cards={handResult.community_cards} />
+            </div>
+          )}
+
           {/* Results Section */}
           <div className="space-y-3">
             <h4 className="font-bold text-gray-800 text-lg border-b pb-2">Hand Results:</h4>
@@ -243,9 +257,12 @@ function HandResultModal({
                     {index === handResult.winner && (
                       <Badge className="ml-2 bg-yellow-500 text-yellow-900">Winner</Badge>
                     )}
+                    {handResult.folded && handResult.folded[index] && (
+                      <Badge variant="destructive" className="ml-2">Folded</Badge>
+                    )}
                   </div>
                   <div className="text-right">
-                    <div className={`text-xl font-bold ${payoff >= 0 ? "text-green-600" : "text-red-600"}`}>
+                    <div className={`text-xl font-bold ${payoff >= 0 ? "text-green-600" : "text-red-600"}`}> 
                       {payoff >= 0 ? "+" : ""}
                       {payoff}
                     </div>
@@ -256,10 +273,13 @@ function HandResultModal({
                 {/* Hand Rank Display */}
                 {handResult.hand_ranks && handResult.hand_ranks[index] && (
                   <div className="mt-2 pt-2 border-t border-gray-200">
-                    <div className="flex items-center justify-between">
+                    <div className="flex items-center justify-between mb-2">
                       <span className="text-sm text-gray-600">Hand:</span>
                       <span className="text-sm font-medium text-gray-800">{handResult.hand_ranks[index]}</span>
                     </div>
+                    {handResult.player_hands && handResult.player_hands[index] && (
+                      <CardDisplay cards={handResult.player_hands[index]} />
+                    )}
                   </div>
                 )}
               </div>
@@ -342,6 +362,9 @@ export default function PokerGame() {
           final_stacks: data.hand_results.final_stacks,
           player_names: gameState.players.map((p) => p.name),
           hand_ranks: data.hand_results.hand_ranks || [],
+          community_cards: data.hand_results.community_cards || [],
+          player_hands: data.hand_results.player_hands || [],
+          folded: data.hand_results.folded || [],
         })
       }
 
@@ -377,6 +400,9 @@ export default function PokerGame() {
           final_stacks: data.hand_results.final_stacks,
           player_names: gameState.players.map((p) => p.name),
           hand_ranks: data.hand_results.hand_ranks || [],
+          community_cards: data.hand_results.community_cards || [],
+          player_hands: data.hand_results.player_hands || [],
+          folded: data.hand_results.folded || [],
         })
       }
 

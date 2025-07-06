@@ -251,12 +251,15 @@ def convert_game_state(env, obs: dict, current_player_id: int, ai_last_actions=N
             for i in range(3):
                 hand_rank = get_player_hand_rank(env, i)
                 hand_ranks.append(hand_rank)
-            
+
             hand_results = {
-                "winner": winner if winner is not None else 0,
+                "winner": int(np.argmax(env._last_payoffs)),
                 "payoffs": env._last_payoffs,
                 "final_stacks": [p["stack"] for p in players],
-                "hand_ranks": hand_ranks
+                "hand_ranks": hand_ranks,
+                "community_cards": [format_card(c) for c in env.game.public_cards],
+                "player_hands": [[format_card(c) for c in pl.hand] for pl in env.game.players],
+                "folded": [getattr(pl, "folded", False) for pl in env.game.players],
             }
         
         return GameState(
@@ -345,10 +348,13 @@ async def start_game():
 
             global last_hand_results
             last_hand_results = {
-                "winner": detect_winner(env) if detect_winner(env) is not None else 0,
+                "winner": int(np.argmax(payoffs_list)),
                 "payoffs": payoffs_list,
                 "final_stacks": [p.stack for p in env.game.players],
                 "hand_ranks": hand_ranks,
+                "community_cards": [format_card(c) for c in env.game.public_cards],
+                "player_hands": [[format_card(c) for c in p.hand] for p in env.game.players],
+                "folded": [getattr(p, "folded", False) for p in env.game.players],
             }
 
             if not any(p.stack <= 0 for p in env.game.players):
@@ -539,10 +545,13 @@ async def make_action(request: ActionRequest):
 
             global last_hand_results
             last_hand_results = {
-                "winner": detect_winner(env) if detect_winner(env) is not None else 0,
+                "winner": int(np.argmax(payoffs_list)),
                 "payoffs": payoffs_list,
                 "final_stacks": [p.stack for p in env.game.players],
                 "hand_ranks": hand_ranks,
+                "community_cards": [format_card(c) for c in env.game.public_cards],
+                "player_hands": [[format_card(c) for c in p.hand] for p in env.game.players],
+                "folded": [getattr(p, "folded", False) for p in env.game.players],
             }
 
             # 新しいハンドの開始（誰も破産していない場合）
