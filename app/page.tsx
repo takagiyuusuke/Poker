@@ -572,7 +572,7 @@ export default function PokerGame() {
                             </div>
                             <div>
                               <div className="text-gray-600 mb-1">Bet</div>
-                              <ChipStack amount={player.in_chips} size="sm" />
+                              <ChipStack amount={player.in_chips / 2} size="sm" />
                             </div>
                           </div>
                           {/* Folded バッジ */}
