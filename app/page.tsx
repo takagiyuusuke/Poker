@@ -498,7 +498,7 @@ export default function PokerGame() {
             </div>
             <div className="flex items-center gap-2">
               <Coins className="w-4 h-4" />
-              <span>Pot: {"$" + gameState.pot}</span>
+              <span>Pot: {"$" + gameState.pot / 2}</span>
             </div>
             <span>Current: {gameState.players?.[gameState.current_player]?.name}</span>
           </div>
@@ -518,7 +518,7 @@ export default function PokerGame() {
             </div>
             {/* Pot visualization */}
             <div className="mt-3 flex justify-center">
-              <ChipStack amount={gameState.pot} size="lg" />
+              <ChipStack amount={gameState.pot / 2} size="lg" />
             </div>
           </div>
 
