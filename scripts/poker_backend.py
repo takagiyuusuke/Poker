@@ -441,9 +441,9 @@ def advance_ai_turns(env, obs: dict, current_player_id: int, *, context: str = "
             f"Stacks: {[p.stack for p in env.game.players]}, Bets: {[p.in_chips for p in env.game.players]}"
         )
 
-        if step_count > max_steps:
-            print("[AI] Max steps reached, breaking loop")
-            break
+        # if step_count > max_steps:
+        #     print("[AI] Max steps reached, breaking loop")
+        #     break
 
         current_state = (
             current_player_id,
@@ -511,9 +511,9 @@ async def make_action(request: ActionRequest):
             ai_step_count += 1
             print(f"[AI] Turn {ai_step_count}, Player {current_player_id}, Stacks: {[p.stack for p in env.game.players]}, Bets: {[p.in_chips for p in env.game.players]}")
             
-            if ai_step_count > max_ai_steps:
-                print("[AI] Max steps reached, breaking loop")
-                break
+            # if ai_step_count > max_ai_steps:
+            #     print("[AI] Max steps reached, breaking loop")
+            #     break
 
             # 状態が変化しないループを検出
             current_state = (current_player_id, [p.stack for p in env.game.players], [p.in_chips for p in env.game.players])
