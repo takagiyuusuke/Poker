@@ -75,7 +75,8 @@ SUIT2IDX    = {s: i for i, s in enumerate(SUITS)}
 RANK2IDX    = {r: i for i, r in enumerate(RANKS)}
 CARD2IDX    = {f"{r}{s}": (SUIT2IDX[s], RANK2IDX[r]) for s in SUITS for r in RANKS}
 STAGE2IDX   = {"preflop":0, "flop":1, "turn":2, "river":3}
-STATE_DIM   = 4*13*2 + 5 + 4
+# state dimension updated for extra opponent info
+STATE_DIM   = 4*13*2 + 11 + 4
 
 # ───────────────────────── Utilities ─────────────────────────
 
@@ -88,33 +89,64 @@ def _cards_map(cards: List[Any]) -> np.ndarray:
             mat[s_i, r_i] = 1.0
     return mat.flatten()
 
-def extract_state(player_state: dict) -> torch.Tensor:
-    hole  = _cards_map(player_state.get("hand", []))
+def extract_state(player_state: dict,
+                  opponent1_state: dict,
+                  opponent2_state: dict) -> torch.Tensor:
+    """Return a feature vector for the current player including opponent info."""
+    hole = _cards_map(player_state.get("hand", []))
     board = _cards_map(player_state.get("public_cards", []))
     cards = np.concatenate((hole, board)).astype(np.float32)
 
-    my_stack    = player_state.get("my_chips", 0) / START_BANKROLL
-    pot         = player_state.get("pot", 0) / START_BANKROLL
-    pot_ratio   = pot / (my_stack + 1e-6)
-    # 追加情報
-    stakes      = player_state.get("in_chips", 0) / START_BANKROLL
+    my_stack = player_state.get("my_chips", 0) / START_BANKROLL
+    pot = player_state.get("pot", 0) / START_BANKROLL
+    pot_ratio = pot / (my_stack + 1e-6)
+
+    # additional information for current player
+    stakes = player_state.get("in_chips", 0) / START_BANKROLL
     action_hist = player_state.get("action_record", [])
-    num_raises  = sum(
+    num_raises = sum(
         1 for a in action_hist
+        if hasattr(a, "name") and a.name.lower().startswith("raise")
+    )
+
+    # opponent information
+    opponent1_stack = opponent1_state.get("my_chips", 0) / START_BANKROLL
+    opponent2_stack = opponent2_state.get("my_chips", 0) / START_BANKROLL
+    pot_ratio1 = opponent1_stack / (opponent1_stack + 1e-6)
+    pot_ratio2 = opponent2_stack / (opponent2_stack + 1e-6)
+    action_hist1 = opponent1_state.get("action_record", [])
+    action_hist2 = opponent2_state.get("action_record", [])
+    num_raises1 = sum(
+        1 for a in action_hist1
+        if hasattr(a, "name") and a.name.lower().startswith("raise")
+    )
+    num_raises2 = sum(
+        1 for a in action_hist2
         if hasattr(a, "name") and a.name.lower().startswith("raise")
     )
 
     stage_str = player_state.get("stage", "preflop")
     stage_idx = STAGE2IDX.get(stage_str, 0)
-    stage_oh  = np.eye(4, dtype=np.float32)[stage_idx]
+    stage_oh = np.eye(4, dtype=np.float32)[stage_idx]
 
     vec = np.concatenate((
         cards,
-        [my_stack, pot, pot_ratio, stakes, num_raises],
-        stage_oh
+        [
+            my_stack,
+            opponent1_stack,
+            opponent2_stack,
+            pot,
+            pot_ratio,
+            pot_ratio1,
+            pot_ratio2,
+            stakes,
+            num_raises,
+            num_raises1,
+            num_raises2,
+        ],
+        stage_oh,
     ))
-    
-    # print("extract_state vec.shape:", vec.shape)  # ←追加
+
     return torch.from_numpy(vec).float()
 
 def map_action_to_id(obs: dict, action_name_str: str) -> int | None:
@@ -267,7 +299,8 @@ class Population:
             @torch.no_grad()
             def step(self, obs: dict) -> int:
                 legal_actions = list(obs['legal_actions'].keys())
-                state_vec = extract_state(obs['raw_obs']).to(DEVICE)
+                raw = obs['raw_obs']
+                state_vec = extract_state(raw, raw, raw).to(DEVICE)
                 q_values = self.model(state_vec.unsqueeze(0)).squeeze(0)
                 mask = torch.full((self.action_dim,), -float('inf'), device=DEVICE)
                 mask[legal_actions] = 0
@@ -305,7 +338,7 @@ def train_bc(net: QNet, data: List[Tuple[dict, int]]):
         def __len__(self): return len(self.data)
         def __getitem__(self, idx):
             raw_obs, action_id = self.data[idx]
-            return extract_state(raw_obs), action_id
+            return extract_state(raw_obs, raw_obs, raw_obs), action_id
 
     dataset = BCDataset(data)
     loader = torch.utils.data.DataLoader(dataset, batch_size=BC_BATCH, shuffle=True)
@@ -388,7 +421,9 @@ def train(total_episodes: int, resume_path: str | None = None, use_bc: bool = Fa
                     stage_str = raw_obs.get("stage", "preflop")
                     player = env.game.players[0]
                     stack_before = player.stack
-                    state_vec = extract_state(raw_obs)
+                    op1_raw = env.get_state(1)['raw_obs']
+                    op2_raw = env.get_state(2)['raw_obs']
+                    state_vec = extract_state(raw_obs, op1_raw, op2_raw)
                     legal_actions = list(obs['legal_actions'].keys())
                     action = agent.select_action(state_vec, legal_actions)
                     action_name = map_id_to_name(obs, action)
@@ -402,7 +437,12 @@ def train(total_episodes: int, resume_path: str | None = None, use_bc: bool = Fa
                         survive_bonus = STAGE_SURVIVE_BONUS.get(stage_str, STAGE_SURVIVE_BONUS["preflop"])
                     reward = survive_bonus - λ * norm_bet
                     reward = max(min(reward, 1.0), -1.0)
-                    next_state_vec = None if env.is_over() else extract_state(next_obs['raw_obs'])
+                    if env.is_over():
+                        next_state_vec = None
+                    else:
+                        op1_next = env.get_state(1)['raw_obs']
+                        op2_next = env.get_state(2)['raw_obs']
+                        next_state_vec = extract_state(next_obs['raw_obs'], op1_next, op2_next)
                     agent.memory.push(state_vec, action, reward, next_state_vec)
                     agent.optimize_model()
                     total_steps += 1
@@ -526,7 +566,10 @@ def evaluate(num_matches: int, checkpoint_path: Path):
                 current_player_id = env.get_player_id()
                 obs = env.get_state(current_player_id)
                 if current_player_id == 0:
-                    state_vec = extract_state(obs['raw_obs'])
+                    raw = obs['raw_obs']
+                    op1_raw = env.get_state(1)['raw_obs']
+                    op2_raw = env.get_state(2)['raw_obs']
+                    state_vec = extract_state(raw, op1_raw, op2_raw)
                     legal_actions = list(obs['legal_actions'].keys())
                     action = agent.select_action(state_vec, legal_actions, is_greedy=True)
                 else:
@@ -626,7 +669,10 @@ def run_match(env, agent, opponent, mode: str):
         while not env.is_over(): # Hand loop
             if current_player_id == 0: # Agent's turn
                 legal_actions = list(obs['legal_actions'].keys())
-                state_vec = extract_state(obs['raw_obs'])
+                raw = obs['raw_obs']
+                op1_raw = env.get_state(1)['raw_obs']
+                op2_raw = env.get_state(2)['raw_obs']
+                state_vec = extract_state(raw, op1_raw, op2_raw)
                 action_id = agent.select_action(state_vec, legal_actions, is_greedy=True)
                 action_name = map_id_to_name(obs, action_id)
                 print(f"\n>> Agent plays: {action_name} (id={action_id})\n")
