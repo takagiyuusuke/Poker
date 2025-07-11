@@ -85,10 +85,15 @@ def format_card(card) -> str:
         return f"{card.rank}{card.suit}"
     return str(card)
 
-def get_q_values_and_recommendation(agent: DQNAgent, obs: dict) -> tuple:
+def get_q_values_and_recommendation(agent: DQNAgent, env, obs: dict, current_player_id: int) -> tuple:
     """Get Q-values and recommended action from DQN agent."""
     try:
-        state_vec = extract_state(obs['raw_obs'])
+        raw = obs['raw_obs']
+        op1_id = (current_player_id + 1) % 3
+        op2_id = (current_player_id + 2) % 3
+        op1_raw = env.get_state(op1_id)['raw_obs']
+        op2_raw = env.get_state(op2_id)['raw_obs']
+        state_vec = extract_state(raw, op1_raw, op2_raw)
         legal_actions = list(obs['legal_actions'].keys())
         
         with torch.no_grad():
@@ -232,7 +237,7 @@ def convert_game_state(env, obs: dict, current_player_id: int, ai_last_actions=N
         recommended_action = None
         if len(dqn_agents) > 0:
             agent = dqn_agents[current_player_id] if current_player_id < len(dqn_agents) else dqn_agents[0]
-            q_values, recommended_action = get_q_values_and_recommendation(agent, obs)
+            q_values, recommended_action = get_q_values_and_recommendation(agent, env, obs, current_player_id)
         
         global last_hand_results
 
@@ -383,7 +388,10 @@ async def handle_ai_turn(env, obs: dict, current_player_id: int, timeout: int = 
 
             if current_player_id <= len(dqn_agents):
                 agent = dqn_agents[current_player_id - 1]
-                state_vec = extract_state(obs['raw_obs'])
+                raw = obs['raw_obs']
+                op1_raw = env.get_state((current_player_id + 1) % 3)['raw_obs']
+                op2_raw = env.get_state((current_player_id + 2) % 3)['raw_obs']
+                state_vec = extract_state(raw, op1_raw, op2_raw)
                 ai_action = agent.select_action(state_vec, legal_actions, is_greedy=True)
             else:
                 rule_agent = LimitholdemRuleAgentV1()
@@ -454,7 +462,10 @@ def advance_ai_turns(env, obs: dict, current_player_id: int, *, context: str = "
 
         if current_player_id <= len(dqn_agents):
             agent = dqn_agents[current_player_id - 1]
-            state_vec = extract_state(obs["raw_obs"])
+            raw = obs["raw_obs"]
+            op1_raw = env.get_state((current_player_id + 1) % 3)["raw_obs"]
+            op2_raw = env.get_state((current_player_id + 2) % 3)["raw_obs"]
+            state_vec = extract_state(raw, op1_raw, op2_raw)
             ai_action = agent.select_action(state_vec, legal_actions, is_greedy=True)
             ai_action_name = map_id_to_name(obs, ai_action)
             ai_last_actions[current_player_id] = ai_action_name
